@@ -16,6 +16,7 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
     private readonly IConnection _connection;
     private readonly IModel _channel;
     private readonly SemaphoreSlim _channelLock = new(1, 1);
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly JsonSerializerOptions _serializerOptions = new(JsonSerializerDefaults.Web);
     private readonly ConcurrentDictionary<string, byte> _subscriptions = new();
 
@@ -38,6 +39,7 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
         _channel = _connection.CreateModel();
 
         _channel.ExchangeDeclare(_options.ExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
+        _channel.ExchangeDeclare(_options.RetryExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
         _channel.ExchangeDeclare(_options.DeadLetterExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
         _channel.BasicQos(prefetchSize: 0, prefetchCount: _options.PrefetchCount, global: false);
     }
@@ -57,10 +59,24 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
         }
 
         var deadLetterQueueName = $"{queueName}{_options.DeadLetterQueueSuffix}";
+        var retryQueueName = $"{queueName}.retry";
         await ExecuteChannelActionAsync(() =>
         {
             _channel.QueueDeclare(deadLetterQueueName, durable: true, exclusive: false, autoDelete: false);
             _channel.QueueBind(deadLetterQueueName, _options.DeadLetterExchangeName, routingKey);
+
+            _channel.QueueDeclare(
+                queue: retryQueueName,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: new Dictionary<string, object>
+                {
+                    ["x-dead-letter-exchange"] = _options.ExchangeName,
+                    ["x-dead-letter-routing-key"] = routingKey,
+                    ["x-message-ttl"] = _options.RetryDelayMilliseconds
+                });
+            _channel.QueueBind(retryQueueName, _options.RetryExchangeName, routingKey);
 
             _channel.QueueDeclare(
                 queue: queueName,
@@ -86,13 +102,13 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
                     _serializerOptions)
                     ?? throw new InvalidOperationException("Message envelope payload is invalid.");
 
-                await handler(envelope, cancellationToken);
+                await handler(envelope, _lifetimeCancellation.Token);
                 await ExecuteChannelActionAsync(() =>
                 {
                     _channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
                 });
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
             {
                 await ExecuteChannelActionAsync(() =>
                 {
@@ -105,11 +121,26 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
 
                 if (retryCount < _options.RetryCount)
                 {
-                    await RetryAsync(eventArgs, retryCount + 1, cancellationToken);
-                    await ExecuteChannelActionAsync(() =>
+                    try
                     {
-                        _channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
-                    });
+                        await RetryAsync(eventArgs, retryCount + 1);
+                        await ExecuteChannelActionAsync(() =>
+                        {
+                            _channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
+                        });
+                    }
+                    catch
+                    {
+                        await ExecuteChannelActionAsync(() =>
+                        {
+                            _channel.BasicNack(eventArgs.DeliveryTag, multiple: false, requeue: true);
+                        });
+                        _logger.LogError(
+                            exception,
+                            "Failed to publish retry message for command {RoutingKey}; message was requeued.",
+                            routingKey);
+                        return;
+                    }
 
                     _logger.LogWarning(
                         exception,
@@ -144,13 +175,8 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
         return;
     }
 
-    private async Task RetryAsync(BasicDeliverEventArgs eventArgs, int retryCount, CancellationToken cancellationToken)
+    private async Task RetryAsync(BasicDeliverEventArgs eventArgs, int retryCount)
     {
-        if (_options.RetryDelayMilliseconds > 0)
-        {
-            await Task.Delay(_options.RetryDelayMilliseconds, cancellationToken);
-        }
-
         await ExecuteChannelActionAsync(() =>
         {
             var retryProperties = _channel.CreateBasicProperties();
@@ -164,7 +190,7 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
             retryProperties.Headers["x-retry-count"] = retryCount;
 
             _channel.BasicPublish(
-                exchange: _options.ExchangeName,
+                exchange: _options.RetryExchangeName,
                 routingKey: eventArgs.RoutingKey,
                 basicProperties: retryProperties,
                 body: eventArgs.Body);
@@ -219,6 +245,8 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
+        _lifetimeCancellation.Cancel();
+        _lifetimeCancellation.Dispose();
         _channelLock.Dispose();
         _channel.Dispose();
         _connection.Dispose();

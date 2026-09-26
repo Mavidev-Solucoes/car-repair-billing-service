@@ -10,6 +10,7 @@ public sealed class RabbitMqOptions
     public string Password { get; set; } = "guest";
     public string VirtualHost { get; set; } = "/";
     public string ExchangeName { get; set; } = "car-repair.events";
+    public string RetryExchangeName { get; set; } = "car-repair.events.retry";
     public string DeadLetterExchangeName { get; set; } = "car-repair.events.dlx";
     public string DeadLetterQueueSuffix { get; set; } = ".dlq";
     public int RetryCount { get; set; } = 3;
