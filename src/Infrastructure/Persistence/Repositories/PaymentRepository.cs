@@ -1,5 +1,6 @@
 using Application.Abstractions.Persistence;
 using Domain.Entities;
+using Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Infrastructure.Persistence.Repositories;
@@ -23,5 +24,12 @@ public sealed class PaymentRepository : IPaymentRepository
         return _context.Payments
             .Include(x => x.Transactions)
             .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
+
+    public Task<decimal> GetReservedAmountByBudgetIdAsync(Guid budgetId, CancellationToken cancellationToken)
+    {
+        return _context.Payments
+            .Where(x => x.BudgetId == budgetId && x.Status != PaymentStatus.Rejected)
+            .SumAsync(x => x.Amount, cancellationToken);
     }
 }

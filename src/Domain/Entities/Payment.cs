@@ -41,6 +41,7 @@ public sealed class Payment : Entity
 
     public void AddTransaction(PaymentTransaction transaction)
     {
+        transaction.SetPaymentId(Id);
         _transactions.Add(transaction);
     }
 

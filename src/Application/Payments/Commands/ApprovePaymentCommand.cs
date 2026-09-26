@@ -1,6 +1,7 @@
 using Application.Abstractions.Payments;
 using Application.Abstractions.Persistence;
 using Domain.Entities;
+using Domain.Enums;
 using MediatR;
 
 namespace Application.Payments.Commands;
@@ -27,6 +28,11 @@ public sealed class ApprovePaymentCommandHandler : IRequestHandler<ApprovePaymen
     {
         var payment = await _paymentRepository.GetByIdAsync(request.PaymentId, cancellationToken)
             ?? throw new KeyNotFoundException($"Payment '{request.PaymentId}' was not found.");
+
+        if (payment.Status != PaymentStatus.Pending)
+        {
+            throw new InvalidOperationException("Only pending payments can be approved.");
+        }
 
         var result = await _paymentGateway.ProcessAsync(
             payment.Id,

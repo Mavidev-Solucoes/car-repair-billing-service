@@ -25,4 +25,9 @@ public sealed class BudgetItem
     public int Quantity { get; private set; }
 
     public decimal Total => UnitPrice * Quantity;
+
+    internal void SetBudgetId(Guid budgetId)
+    {
+        BudgetId = budgetId;
+    }
 }

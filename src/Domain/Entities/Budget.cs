@@ -17,7 +17,11 @@ public sealed class Budget : Entity
         Id = Guid.NewGuid();
         CustomerName = customerName;
         Status = BudgetStatus.Pending;
-        _items.AddRange(items);
+        foreach (var item in items)
+        {
+            item.SetBudgetId(Id);
+            _items.Add(item);
+        }
         RaiseDomainEvent(new BudgetCreatedDomainEvent(Id));
     }
 

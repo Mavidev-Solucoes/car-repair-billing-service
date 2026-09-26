@@ -3,6 +3,7 @@ using Domain.Enums;
 using FluentValidation;
 using MediatR;
 using Domain.Entities;
+using System.Data;
 
 namespace Application.Payments.Commands;
 
@@ -35,23 +36,32 @@ public sealed class CreatePaymentCommandHandler : IRequestHandler<CreatePaymentC
 
     public async Task<Guid> Handle(CreatePaymentCommand request, CancellationToken cancellationToken)
     {
-        var budget = await _budgetRepository.GetByIdAsync(request.BudgetId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Budget '{request.BudgetId}' was not found.");
+        Guid paymentId = Guid.Empty;
 
-        if (budget.Status != BudgetStatus.Approved)
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
-            throw new InvalidOperationException("Payment can only be created for approved budgets.");
-        }
+            var budget = await _budgetRepository.GetByIdAsync(request.BudgetId, ct)
+                ?? throw new KeyNotFoundException($"Budget '{request.BudgetId}' was not found.");
 
-        if (request.Amount > budget.TotalAmount)
-        {
-            throw new InvalidOperationException("Payment amount cannot exceed budget total amount.");
-        }
+            if (budget.Status != BudgetStatus.Approved)
+            {
+                throw new InvalidOperationException("Payment can only be created for approved budgets.");
+            }
 
-        var payment = new Payment(request.BudgetId, request.Amount);
-        await _paymentRepository.AddAsync(payment, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            var reservedAmount = await _paymentRepository.GetReservedAmountByBudgetIdAsync(request.BudgetId, ct);
+            var projectedTotal = reservedAmount + request.Amount;
 
-        return payment.Id;
+            if (projectedTotal > budget.TotalAmount)
+            {
+                throw new InvalidOperationException("Payment amount cannot exceed the remaining budget balance.");
+            }
+
+            var payment = new Payment(request.BudgetId, request.Amount);
+            await _paymentRepository.AddAsync(payment, ct);
+            await _unitOfWork.SaveChangesAsync(ct);
+            paymentId = payment.Id;
+        }, IsolationLevel.Serializable, cancellationToken);
+
+        return paymentId;
     }
 }

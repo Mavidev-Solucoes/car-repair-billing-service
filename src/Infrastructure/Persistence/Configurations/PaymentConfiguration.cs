@@ -17,6 +17,8 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(x => x.Status).IsRequired();
         builder.Property(x => x.RejectionReason).HasMaxLength(500);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
+        builder.Property(x => x.ApprovedAtUtc);
+        builder.Property(x => x.RejectedAtUtc);
 
         builder.HasMany(x => x.Transactions)
             .WithOne()

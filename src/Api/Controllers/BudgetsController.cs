@@ -25,7 +25,7 @@ public sealed class BudgetsController : ControllerBase
                 request.Items.Select(x => new CreateBudgetItemModel(x.Description, x.UnitPrice, x.Quantity)).ToList()),
             cancellationToken);
 
-        return CreatedAtAction(nameof(Create), new { id = budgetId }, new { id = budgetId });
+        return Created($"/api/budgets/{budgetId}", new { id = budgetId });
     }
 
     [HttpPost("{budgetId:guid}/approve")]

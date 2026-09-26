@@ -26,4 +26,9 @@ public sealed class PaymentTransaction
     public string Message { get; private set; } = string.Empty;
 
     public DateTime CreatedAtUtc { get; private set; }
+
+    internal void SetPaymentId(Guid paymentId)
+    {
+        PaymentId = paymentId;
+    }
 }
