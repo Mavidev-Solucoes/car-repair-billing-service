@@ -15,7 +15,9 @@ public static class DependencyInjection
             configuration.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
         });
 
-        services.AddAutoMapper(Assembly.GetExecutingAssembly());
+        services.AddAutoMapper(
+            configuration => configuration.AddMaps(Assembly.GetExecutingAssembly()),
+            Assembly.GetExecutingAssembly());
         services.AddValidatorsFromAssembly(Assembly.GetExecutingAssembly());
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 

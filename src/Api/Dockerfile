@@ -1,5 +1,6 @@
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
+ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
@@ -12,11 +13,11 @@ COPY ["src/Infrastructure/Infrastructure.csproj", "src/Infrastructure/"]
 RUN dotnet restore "src/Api/Api.csproj"
 COPY . .
 WORKDIR "/src/src/Api"
-RUN dotnet build "Api.csproj" -c $BUILD_CONFIGURATION -o /app/build
+RUN dotnet build "Api.csproj" -c ${BUILD_CONFIGURATION} -o /app/build
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "Api.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "Api.csproj" -c ${BUILD_CONFIGURATION} -o /app/publish /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app
