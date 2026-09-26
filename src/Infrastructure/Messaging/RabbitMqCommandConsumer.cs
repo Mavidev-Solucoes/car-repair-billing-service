@@ -9,12 +9,13 @@ using RabbitMQ.Client.Events;
 
 namespace Infrastructure.Messaging;
 
-public sealed class RabbitMqCommandConsumer : ICommandConsumer, IDisposable
+public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
 {
     private readonly RabbitMqOptions _options;
     private readonly ILogger<RabbitMqCommandConsumer> _logger;
     private readonly IConnection _connection;
     private readonly IModel _channel;
+    private readonly SemaphoreSlim _channelLock = new(1, 1);
     private readonly JsonSerializerOptions _serializerOptions = new(JsonSerializerDefaults.Web);
     private readonly ConcurrentDictionary<string, byte> _subscriptions = new();
 
@@ -41,7 +42,7 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IDisposable
         _channel.BasicQos(prefetchSize: 0, prefetchCount: _options.PrefetchCount, global: false);
     }
 
-    public Task SubscribeAsync<TCommand>(
+    public async Task SubscribeAsync<TCommand>(
         string queueName,
         string routingKey,
         Func<MessageEnvelope<TCommand>, CancellationToken, Task> handler,
@@ -52,26 +53,28 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IDisposable
 
         if (!_subscriptions.TryAdd(queueName, 0))
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var deadLetterQueueName = $"{queueName}{_options.DeadLetterQueueSuffix}";
+        await ExecuteChannelActionAsync(() =>
+        {
+            _channel.QueueDeclare(deadLetterQueueName, durable: true, exclusive: false, autoDelete: false);
+            _channel.QueueBind(deadLetterQueueName, _options.DeadLetterExchangeName, routingKey);
 
-        _channel.QueueDeclare(deadLetterQueueName, durable: true, exclusive: false, autoDelete: false);
-        _channel.QueueBind(deadLetterQueueName, _options.DeadLetterExchangeName, routingKey);
+            _channel.QueueDeclare(
+                queue: queueName,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: new Dictionary<string, object>
+                {
+                    ["x-dead-letter-exchange"] = _options.DeadLetterExchangeName,
+                    ["x-dead-letter-routing-key"] = routingKey
+                });
 
-        _channel.QueueDeclare(
-            queue: queueName,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: new Dictionary<string, object>
-            {
-                ["x-dead-letter-exchange"] = _options.DeadLetterExchangeName,
-                ["x-dead-letter-routing-key"] = routingKey
-            });
-
-        _channel.QueueBind(queueName, _options.ExchangeName, routingKey);
+            _channel.QueueBind(queueName, _options.ExchangeName, routingKey);
+        });
 
         var consumer = new AsyncEventingBasicConsumer(_channel);
         consumer.Received += async (_, eventArgs) =>
@@ -84,7 +87,17 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IDisposable
                     ?? throw new InvalidOperationException("Message envelope payload is invalid.");
 
                 await handler(envelope, cancellationToken);
-                _channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
+                await ExecuteChannelActionAsync(() =>
+                {
+                    _channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
+                });
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await ExecuteChannelActionAsync(() =>
+                {
+                    _channel.BasicNack(eventArgs.DeliveryTag, multiple: false, requeue: true);
+                });
             }
             catch (Exception exception)
             {
@@ -93,7 +106,10 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IDisposable
                 if (retryCount < _options.RetryCount)
                 {
                     await RetryAsync(eventArgs, retryCount + 1, cancellationToken);
-                    _channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
+                    await ExecuteChannelActionAsync(() =>
+                    {
+                        _channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
+                    });
 
                     _logger.LogWarning(
                         exception,
@@ -104,7 +120,10 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IDisposable
                 }
                 else
                 {
-                    _channel.BasicNack(eventArgs.DeliveryTag, multiple: false, requeue: false);
+                    await ExecuteChannelActionAsync(() =>
+                    {
+                        _channel.BasicNack(eventArgs.DeliveryTag, multiple: false, requeue: false);
+                    });
 
                     _logger.LogError(
                         exception,
@@ -115,11 +134,14 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IDisposable
             }
         };
 
-        _channel.BasicConsume(queue: queueName, autoAck: false, consumer: consumer);
+        await ExecuteChannelActionAsync(() =>
+        {
+            _channel.BasicConsume(queue: queueName, autoAck: false, consumer: consumer);
+        });
 
         _logger.LogInformation("Subscribed command consumer to queue {QueueName} with routing key {RoutingKey}.", queueName, routingKey);
 
-        return Task.CompletedTask;
+        return;
     }
 
     private async Task RetryAsync(BasicDeliverEventArgs eventArgs, int retryCount, CancellationToken cancellationToken)
@@ -129,21 +151,37 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IDisposable
             await Task.Delay(_options.RetryDelayMilliseconds, cancellationToken);
         }
 
-        var retryProperties = _channel.CreateBasicProperties();
-        retryProperties.Persistent = true;
-        retryProperties.ContentType = eventArgs.BasicProperties.ContentType;
-        retryProperties.CorrelationId = eventArgs.BasicProperties.CorrelationId;
-        retryProperties.MessageId = eventArgs.BasicProperties.MessageId;
-        retryProperties.Type = eventArgs.BasicProperties.Type;
-        retryProperties.Timestamp = eventArgs.BasicProperties.Timestamp;
-        retryProperties.Headers = CloneHeaders(eventArgs.BasicProperties.Headers);
-        retryProperties.Headers["x-retry-count"] = retryCount;
+        await ExecuteChannelActionAsync(() =>
+        {
+            var retryProperties = _channel.CreateBasicProperties();
+            retryProperties.Persistent = true;
+            retryProperties.ContentType = eventArgs.BasicProperties.ContentType;
+            retryProperties.CorrelationId = eventArgs.BasicProperties.CorrelationId;
+            retryProperties.MessageId = eventArgs.BasicProperties.MessageId;
+            retryProperties.Type = eventArgs.BasicProperties.Type;
+            retryProperties.Timestamp = eventArgs.BasicProperties.Timestamp;
+            retryProperties.Headers = CloneHeaders(eventArgs.BasicProperties.Headers);
+            retryProperties.Headers["x-retry-count"] = retryCount;
 
-        _channel.BasicPublish(
-            exchange: _options.ExchangeName,
-            routingKey: eventArgs.RoutingKey,
-            basicProperties: retryProperties,
-            body: eventArgs.Body);
+            _channel.BasicPublish(
+                exchange: _options.ExchangeName,
+                routingKey: eventArgs.RoutingKey,
+                basicProperties: retryProperties,
+                body: eventArgs.Body);
+        });
+    }
+
+    private async Task ExecuteChannelActionAsync(Action action)
+    {
+        await _channelLock.WaitAsync();
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _channelLock.Release();
+        }
     }
 
     private static IDictionary<string, object> CloneHeaders(IDictionary<string, object>? source)
@@ -179,9 +217,11 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IDisposable
         };
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
+        _channelLock.Dispose();
         _channel.Dispose();
         _connection.Dispose();
+        return ValueTask.CompletedTask;
     }
 }

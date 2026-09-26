@@ -7,71 +7,91 @@ using RabbitMQ.Client;
 
 namespace Infrastructure.Messaging;
 
-public sealed class RabbitMqEventPublisher : IEventPublisher
+public sealed class RabbitMqEventPublisher : IEventPublisher, IAsyncDisposable
 {
-    private readonly RabbitMqOptions _options;
+    private readonly string _exchangeName;
     private readonly ILogger<RabbitMqEventPublisher> _logger;
+    private readonly IConnection _connection;
+    private readonly SemaphoreSlim _publishLock = new(1, 1);
     private readonly JsonSerializerOptions _serializerOptions = new(JsonSerializerDefaults.Web);
 
     public RabbitMqEventPublisher(IOptions<RabbitMqOptions> options, ILogger<RabbitMqEventPublisher> logger)
     {
-        _options = options.Value;
+        var rabbitMqOptions = options.Value;
+        _exchangeName = rabbitMqOptions.ExchangeName;
         _logger = logger;
+
+        var factory = new ConnectionFactory
+        {
+            HostName = rabbitMqOptions.HostName,
+            Port = rabbitMqOptions.Port,
+            UserName = rabbitMqOptions.UserName,
+            Password = rabbitMqOptions.Password,
+            VirtualHost = rabbitMqOptions.VirtualHost
+        };
+
+        _connection = factory.CreateConnection();
+
+        using var bootstrapChannel = _connection.CreateModel();
+        bootstrapChannel.ExchangeDeclare(rabbitMqOptions.ExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
     }
 
-    public Task PublishAsync<TEvent>(
+    public async Task PublishAsync<TEvent>(
         MessageEnvelope<TEvent> envelope,
         string routingKey,
         CancellationToken cancellationToken = default)
         where TEvent : class
     {
-        cancellationToken.ThrowIfCancellationRequested();
+        await _publishLock.WaitAsync(cancellationToken);
 
-        var factory = new ConnectionFactory
+        try
         {
-            HostName = _options.HostName,
-            Port = _options.Port,
-            UserName = _options.UserName,
-            Password = _options.Password,
-            VirtualHost = _options.VirtualHost
-        };
+            cancellationToken.ThrowIfCancellationRequested();
 
-        using var connection = factory.CreateConnection();
-        using var channel = connection.CreateModel();
+            using var channel = _connection.CreateModel();
+            var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(envelope, _serializerOptions));
+            var properties = channel.CreateBasicProperties();
+            properties.Persistent = true;
+            properties.ContentType = "application/json";
+            properties.MessageId = envelope.MessageId.ToString();
+            properties.CorrelationId = envelope.CorrelationId.ToString();
+            properties.Type = envelope.EventType;
+            properties.Timestamp = new AmqpTimestamp(envelope.OccurredAt.ToUnixTimeSeconds());
+            properties.Headers = new Dictionary<string, object>
+            {
+                ["event-version"] = envelope.EventVersion,
+                ["occurred-at"] = envelope.OccurredAt.ToString("O")
+            };
 
-        channel.ExchangeDeclare(_options.ExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
+            if (envelope.SagaId.HasValue)
+            {
+                properties.Headers["saga-id"] = envelope.SagaId.Value.ToString();
+            }
 
-        var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(envelope, _serializerOptions));
-        var properties = channel.CreateBasicProperties();
-        properties.Persistent = true;
-        properties.ContentType = "application/json";
-        properties.MessageId = envelope.MessageId.ToString();
-        properties.CorrelationId = envelope.CorrelationId.ToString();
-        properties.Type = envelope.EventType;
-        properties.Timestamp = new AmqpTimestamp(envelope.OccurredAt.ToUnixTimeSeconds());
-        properties.Headers = new Dictionary<string, object>
-        {
-            ["event-version"] = envelope.EventVersion,
-            ["occurred-at"] = envelope.OccurredAt.ToString("O")
-        };
+            channel.BasicPublish(
+                exchange: _exchangeName,
+                routingKey: routingKey,
+                basicProperties: properties,
+                body: body);
 
-        if (envelope.SagaId.HasValue)
-        {
-            properties.Headers["saga-id"] = envelope.SagaId.Value.ToString();
+            _logger.LogInformation(
+                "Published event {EventType} with MessageId {MessageId} to routing key {RoutingKey}.",
+                envelope.EventType,
+                envelope.MessageId,
+                routingKey);
+
+            return;
         }
+        finally
+        {
+            _publishLock.Release();
+        }
+    }
 
-        channel.BasicPublish(
-            exchange: _options.ExchangeName,
-            routingKey: routingKey,
-            basicProperties: properties,
-            body: body);
-
-        _logger.LogInformation(
-            "Published event {EventType} with MessageId {MessageId} to routing key {RoutingKey}.",
-            envelope.EventType,
-            envelope.MessageId,
-            routingKey);
-
-        return Task.CompletedTask;
+    public ValueTask DisposeAsync()
+    {
+        _publishLock.Dispose();
+        _connection.Dispose();
+        return ValueTask.CompletedTask;
     }
 }
