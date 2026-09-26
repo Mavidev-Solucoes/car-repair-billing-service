@@ -29,6 +29,7 @@ jobs:
 
       - name: Detect SonarCloud availability
         id: sonar-config
+        shell: bash
         run: |
           if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_PROJECT_KEY" ] && [ -n "$SONAR_ORGANIZATION" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
@@ -63,7 +64,7 @@ jobs:
       - name: SonarQube Begin
         if: steps.sonar-config.outputs.enabled == 'true'
         run: |
-          dotnet sonarscanner begin \
+          ~/.dotnet/tools/dotnet-sonarscanner begin \
             /k:"$SONAR_PROJECT_KEY" \
             /o:"$SONAR_ORGANIZATION" \
             /d:sonar.token="$SONAR_TOKEN" \
@@ -75,6 +76,7 @@ jobs:
         run: dotnet build ${{ github.workspace }}/CarRepairBillingService.sln --configuration Release --no-restore
 
       - name: Discover test projects
+        shell: bash
         run: |
           mapfile -t test_projects < <(find ${{ github.workspace }} -type f \( -name "*Tests.csproj" -o -name "*Test*.csproj" \) | sort)
 
@@ -86,6 +88,7 @@ jobs:
           printf '%s\n' "${test_projects[@]}" > ${{ github.workspace }}/test-projects.txt
 
       - name: 3. Unit Tests
+        shell: bash
         run: |
           mkdir -p ${{ github.workspace }}/TestResults/Coverage/raw
 
@@ -104,12 +107,13 @@ jobs:
             echo "Running tests with Coverlet for $project"
             ~/.dotnet/tools/coverlet "$assembly_path" \
               --target "dotnet" \
-              --targetargs "vstest "$assembly_path"" \
+              --targetargs "vstest \"$assembly_path\"" \
               --output "${{ github.workspace }}/TestResults/Coverage/raw/${project_name}.opencover.xml" \
               --format opencover
           done < ${{ github.workspace }}/test-projects.txt
 
       - name: 4. Generate Code Coverage
+        shell: bash
         run: |
           shopt -s nullglob
           reports=(${{ github.workspace }}/TestResults/Coverage/raw/*.opencover.xml)
@@ -146,7 +150,7 @@ jobs:
 
       - name: 5. SonarQube Analysis
         if: steps.sonar-config.outputs.enabled == 'true'
-        run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+        run: ~/.dotnet/tools/dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: 5.1 Sonar Quality Gate
         if: steps.sonar-config.outputs.enabled == 'true'
