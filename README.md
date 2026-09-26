@@ -9,6 +9,20 @@ To enable SonarCloud stages in the CI pipeline, configure these repository secre
 - `SONAR_PROJECT_KEY`: SonarCloud project key.
 - `SONAR_ORGANIZATION`: SonarCloud organization key.
 
+## GitHub Actions CD - GHCR Publish
+
+The CD workflow (`.github/workflows/cd.yml`) runs only after a successful CI run (`workflow_run`) on `main` or `develop` push events.
+
+Required secrets and permissions:
+
+- `GITHUB_TOKEN` (automatically provided by GitHub Actions, no manual secret creation needed).
+- Workflow `permissions.packages: write` to publish images to GHCR.
+
+Published image tags:
+
+- `latest`
+- `<commit-sha>` (from the successful CI run commit)
+
 ## CI Quality Gates
 
 The CI workflow validates pull requests to `main` and pushes to `main`/`develop` with these checks:
