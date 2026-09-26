@@ -67,7 +67,7 @@ jobs:
             /o:"$SONAR_ORGANIZATION" \
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url="https://sonarcloud.io" \
-            /d:sonar.cs.opencover.reportsPaths="TestResults/Coverage/raw/*.opencover.xml" \
+            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /s:"$GITHUB_WORKSPACE/sonar-project.properties"
 
       - name: 2. Build
@@ -78,11 +78,19 @@ jobs:
         shell: bash
         run: |
           mapfile -t test_projects < <(
-            find ${{ github.workspace }} -type f -name "*.csproj" | sort | while IFS= read -r project; do
-              if grep -Eq '<IsTestProject>true</IsTestProject>|<PackageReference Include="Microsoft.NET.Test.Sdk"|<PackageReference Include="xunit"|<PackageReference Include="NUnit"|<PackageReference Include="MSTest\.TestFramework"' "$project"; then
-                echo "$project"
-              fi
-            done
+            dotnet sln ${{ github.workspace }}/CarRepairBillingService.sln list \
+              | awk 'NR > 2 {print $0}' \
+              | sed 's/^[[:space:]]*//' \
+              | grep -Ei '(test|tests).*\.csproj$' \
+              | while IFS= read -r project; do
+                  if [ -n "$project" ]; then
+                    if [[ "$project" = /* ]]; then
+                      echo "$project"
+                    else
+                      echo "${{ github.workspace }}/$project"
+                    fi
+                  fi
+                done
           )
 
           if [ "${#test_projects[@]}" -eq 0 ]; then
@@ -95,7 +103,7 @@ jobs:
       - name: 3. Unit Tests
         shell: bash
         run: |
-          mkdir -p ${{ github.workspace }}/TestResults/Coverage/raw
+          mkdir -p ${{ github.workspace }}/TestResults
 
           while IFS= read -r project; do
             project_name=$(basename "$project" .csproj)
@@ -105,23 +113,22 @@ jobs:
               --configuration Release \
               --no-build \
               --verbosity normal \
-              /p:CollectCoverage=true \
-              /p:CoverletOutputFormat=opencover \
-              /p:CoverletOutput="${{ github.workspace }}/TestResults/Coverage/raw/${project_name}.opencover.xml"
+              --collect:"XPlat Code Coverage;Format=opencover" \
+              --results-directory "${{ github.workspace }}/TestResults/${project_name}"
           done < ${{ github.workspace }}/test-projects.txt
 
       - name: 4. Generate Code Coverage
         shell: bash
         run: |
           shopt -s nullglob
-          reports=(${{ github.workspace }}/TestResults/Coverage/raw/*.opencover.xml)
+          reports=(${{ github.workspace }}/TestResults/**/coverage.opencover.xml)
           if [ "${#reports[@]}" -eq 0 ]; then
-            echo "Coverage reports were not generated. Ensure test projects include Coverlet integration."
+            echo "Coverage reports were not generated. Ensure tests support XPlat Code Coverage collection."
             exit 1
           fi
 
           ~/.dotnet/tools/reportgenerator \
-            "-reports:${{ github.workspace }}/TestResults/Coverage/raw/*.opencover.xml" \
+            "-reports:${{ github.workspace }}/TestResults/**/coverage.opencover.xml" \
             "-targetdir:${{ github.workspace }}/TestResults/Coverage/report" \
             "-reporttypes:TextSummary;Cobertura"
 
@@ -154,6 +161,8 @@ jobs:
         if: steps.sonar-config.outputs.enabled == 'true'
         uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b
         timeout-minutes: 10
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           scanMetadataReportFile: ${{ github.workspace }}/.sonarqube/out/.sonar/report-task.txt
 
