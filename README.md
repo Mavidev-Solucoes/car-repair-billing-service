@@ -16,6 +16,7 @@ The CD workflow (`.github/workflows/cd.yml`) runs only after a successful CI run
 Required secrets and permissions:
 
 - `GITHUB_TOKEN` (automatically provided by GitHub Actions, no manual secret creation needed).
+- Workflow `permissions.contents: read` to checkout the commit from the successful CI run.
 - Workflow `permissions.packages: write` to publish images to GHCR.
 
 Published image tags:
