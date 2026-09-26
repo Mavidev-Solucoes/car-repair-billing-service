@@ -1,5 +1,7 @@
 using Application.Abstractions.Payments;
 using Application.Abstractions.Persistence;
+using Application.Abstractions.Messaging;
+using Infrastructure.Messaging;
 using Infrastructure.Payments;
 using Infrastructure.Persistence;
 using Infrastructure.Persistence.Repositories;
@@ -22,6 +24,9 @@ public static class DependencyInjection
         services.AddScoped<IPaymentRepository, PaymentRepository>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<ApplicationDbContext>());
         services.AddSingleton<IPaymentGateway, FakePaymentGateway>();
+        services.Configure<RabbitMqOptions>(configuration.GetSection(RabbitMqOptions.SectionName));
+        services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
+        services.AddSingleton<ICommandConsumer, RabbitMqCommandConsumer>();
 
         return services;
     }
