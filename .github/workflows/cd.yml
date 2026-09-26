@@ -17,7 +17,7 @@ permissions:
 jobs:
   publish-image:
     name: Build and Publish Docker Image
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository && (github.event.workflow_run.head_branch == 'main' || github.event.workflow_run.head_branch == 'develop') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -55,7 +55,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker image
-        if: ${{ github.event.workflow_run.head_branch == 'main' || github.event.workflow_run.head_branch == 'develop' }}
         uses: docker/build-push-action@v6
         with:
           context: ${{ github.workspace }}
