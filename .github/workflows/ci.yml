@@ -119,7 +119,7 @@ jobs:
           }
 
       - name: 5. SonarQube Analysis
-        if: steps.sonar-config.outputs.enabled == 'true'
+        if: always() && steps.sonar-config.outputs.enabled == 'true'
         run: ~/.dotnet/tools/dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: 5.1 Sonar Quality Gate
