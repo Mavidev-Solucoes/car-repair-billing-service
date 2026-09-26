@@ -27,14 +27,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect SonarCloud availability
-        id: sonar-config
+      - name: Validate SonarCloud secrets
         shell: bash
         run: |
-          if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_PROJECT_KEY" ] && [ -n "$SONAR_ORGANIZATION" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          if [ -z "$SONAR_TOKEN" ] || [ -z "$SONAR_PROJECT_KEY" ] || [ -z "$SONAR_ORGANIZATION" ]; then
+            echo "Missing required SonarCloud secrets: SONAR_TOKEN, SONAR_PROJECT_KEY, SONAR_ORGANIZATION"
+            exit 1
           fi
 
       - name: Setup .NET 8
@@ -43,7 +41,6 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Setup Java 17 for Sonar
-        if: steps.sonar-config.outputs.enabled == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -53,14 +50,12 @@ jobs:
         run: dotnet tool install --global dotnet-reportgenerator-globaltool
 
       - name: Install SonarScanner for .NET
-        if: steps.sonar-config.outputs.enabled == 'true'
         run: dotnet tool install --global dotnet-sonarscanner
 
       - name: 1. Restore
         run: dotnet restore ${{ github.workspace }}/CarRepairBillingService.sln
 
       - name: SonarQube Begin
-        if: steps.sonar-config.outputs.enabled == 'true'
         run: |
           ~/.dotnet/tools/dotnet-sonarscanner begin \
             /k:"$SONAR_PROJECT_KEY" \
@@ -74,7 +69,6 @@ jobs:
         run: dotnet build ${{ github.workspace }}/CarRepairBillingService.sln --configuration Release --no-restore
 
       - name: Discover test projects
-        id: discover-tests
         shell: bash
         run: |
           mapfile -t test_projects < <(
@@ -94,7 +88,7 @@ jobs:
           )
 
           if [ "${#test_projects[@]}" -eq 0 ]; then
-            echo "No test projects found. Ensure test projects define IsTestProject=true or reference a supported test SDK/package."
+            echo "No test projects found in solution."
             exit 1
           fi
 
@@ -120,8 +114,8 @@ jobs:
       - name: 4. Generate Code Coverage
         shell: bash
         run: |
-          shopt -s nullglob
-          reports=(${{ github.workspace }}/TestResults/**/coverage.opencover.xml)
+          shopt -s globstar nullglob
+          reports=("${{ github.workspace }}"/TestResults/**/coverage.opencover.xml)
           if [ "${#reports[@]}" -eq 0 ]; then
             echo "Coverage reports were not generated. Ensure tests support XPlat Code Coverage collection."
             exit 1
@@ -154,21 +148,19 @@ jobs:
           }
 
       - name: 5. SonarQube Analysis
-        if: steps.sonar-config.outputs.enabled == 'true'
         run: ~/.dotnet/tools/dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: 5.1 Sonar Quality Gate
         id: sonar-quality-gate
-        if: steps.sonar-config.outputs.enabled == 'true'
         uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b
         timeout-minutes: 10
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
         with:
           scanMetadataReportFile: ${{ github.workspace }}/.sonarqube/out/.sonar/report-task.txt
 
       - name: Enforce Sonar Quality Gate
-        if: steps.sonar-config.outputs.enabled == 'true'
         shell: bash
         run: |
           quality_gate_status="${{ steps.sonar-quality-gate.outputs.quality-gate-status }}"
@@ -178,10 +170,6 @@ jobs:
             echo "Sonar quality gate failed with status: ${quality_gate_status}"
             exit 1
           fi
-
-      - name: SonarQube skipped notice
-        if: steps.sonar-config.outputs.enabled != 'true'
-        run: echo "SonarQube analysis skipped because required SonarCloud secrets are not configured in this context."
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
