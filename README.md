@@ -20,8 +20,8 @@ Required secrets and permissions:
 
 Published image tags:
 
-- `latest`
-- `<commit-sha>` (from the successful CI run commit)
+- `latest` (published only for `main`)
+- `<commit-sha>` (published for `main` and `develop`, from the successful CI run commit)
 
 ## CI Quality Gates
 
