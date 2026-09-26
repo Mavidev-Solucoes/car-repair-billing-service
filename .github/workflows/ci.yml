@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Restore, Build, Test, Coverage, Sonar and Docker Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Java 17 for Sonar
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install SonarScanner for .NET and ReportGenerator
+        run: |
+          dotnet tool install --global dotnet-sonarscanner
+          dotnet tool install --global dotnet-reportgenerator-globaltool
+
+      - name: 1. Restore
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+          SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ] || [ -z "$SONAR_PROJECT_KEY" ] || [ -z "$SONAR_ORGANIZATION" ]; then
+            echo "One or more required SonarCloud secrets are missing (SONAR_TOKEN, SONAR_PROJECT_KEY, SONAR_ORGANIZATION)."
+            exit 1
+          fi
+
+          dotnet sonarscanner begin \
+            /k:"$SONAR_PROJECT_KEY" \
+            /o:"$SONAR_ORGANIZATION" \
+            /d:sonar.token="$SONAR_TOKEN" \
+            /d:sonar.host.url="https://sonarcloud.io" \
+            /d:sonar.cs.opencover.reportsPaths="TestResults/Coverage/raw/*.opencover.xml" \
+            /s:"$GITHUB_WORKSPACE/sonar-project.properties"
+
+          dotnet restore ${{ github.workspace }}/CarRepairBillingService.sln
+
+      - name: 2. Build
+        run: dotnet build ${{ github.workspace }}/CarRepairBillingService.sln --configuration Release --no-restore
+
+      - name: Discover test projects
+        id: discover-tests
+        run: |
+          mapfile -t test_projects < <(find ${{ github.workspace }} -type f \( -name "*Tests.csproj" -o -name "*Test*.csproj" \) | sort)
+
+          if [ "${#test_projects[@]}" -eq 0 ]; then
+            echo "No test projects found. Add xUnit test projects to run Unit Tests and Coverage stages."
+            exit 1
+          fi
+
+          printf '%s\n' "${test_projects[@]}" > ${{ github.workspace }}/test-projects.txt
+
+      - name: 3. Unit Tests
+        run: |
+          while IFS= read -r project; do
+            echo "Running tests for $project"
+            dotnet test "$project" --configuration Release --no-build --verbosity normal
+          done < ${{ github.workspace }}/test-projects.txt
+
+      - name: 4. Generate Code Coverage
+        run: |
+          mkdir -p ${{ github.workspace }}/TestResults/Coverage/raw
+
+          while IFS= read -r project; do
+            project_name=$(basename "$project" .csproj)
+            echo "Collecting coverage for $project"
+
+            dotnet test "$project" \
+              --configuration Release \
+              --no-build \
+              /p:CollectCoverage=true \
+              /p:CoverletOutputFormat=opencover \
+              /p:CoverletOutput="${{ github.workspace }}/TestResults/Coverage/raw/${project_name}.opencover.xml"
+          done < ${{ github.workspace }}/test-projects.txt
+
+          shopt -s nullglob
+          reports=(${{ github.workspace }}/TestResults/Coverage/raw/*.opencover.xml)
+          if [ "${#reports[@]}" -eq 0 ]; then
+            echo "Coverage reports were not generated. Ensure test projects include Coverlet support."
+            exit 1
+          fi
+
+          ~/.dotnet/tools/reportgenerator \
+            "-reports:${{ github.workspace }}/TestResults/Coverage/raw/*.opencover.xml" \
+            "-targetdir:${{ github.workspace }}/TestResults/Coverage/report" \
+            "-reporttypes:TextSummary;Cobertura"
+
+          summary_file="${{ github.workspace }}/TestResults/Coverage/report/Summary.txt"
+          if [ ! -f "$summary_file" ]; then
+            echo "Coverage summary file was not generated."
+            exit 1
+          fi
+
+          line_coverage=$(grep -E '^Line coverage:' "$summary_file" | sed -E 's/.*: ([0-9]+(\.[0-9]+)?)%.*/\1/' | head -n 1)
+
+          if [ -z "$line_coverage" ]; then
+            echo "Unable to parse line coverage from Summary.txt"
+            cat "$summary_file"
+            exit 1
+          fi
+
+          echo "Line coverage: ${line_coverage}%"
+          echo "line_coverage=${line_coverage}" >> "$GITHUB_OUTPUT"
+
+          awk -v coverage="$line_coverage" 'BEGIN { if (coverage + 0 < 80) { exit 1 } }' || {
+            echo "Code coverage threshold not met. Required: 80%, current: ${line_coverage}%"
+            exit 1
+          }
+
+      - name: 5. SonarQube Analysis
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+
+      - name: 5.1 Sonar Quality Gate
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        timeout-minutes: 10
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          scanMetadataReportFile: ${{ github.workspace }}/.sonarqube/out/.sonar/report-task.txt
+
+      - name: 6. Docker Build Validation
+        run: docker build -f ${{ github.workspace }}/src/Api/Dockerfile ${{ github.workspace }} --build-arg BUILD_CONFIGURATION=Release
