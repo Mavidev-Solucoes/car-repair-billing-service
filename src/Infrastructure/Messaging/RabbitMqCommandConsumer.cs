@@ -9,7 +9,7 @@ using RabbitMQ.Client.Events;
 
 namespace Infrastructure.Messaging;
 
-public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
+public sealed class RabbitMqCommandConsumer : ICommandConsumer, IDisposable, IAsyncDisposable
 {
     private readonly RabbitMqOptions _options;
     private readonly ILogger<RabbitMqCommandConsumer> _logger;
@@ -62,7 +62,7 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
         }
 
         var deadLetterQueueName = $"{queueName}{_options.DeadLetterQueueSuffix}";
-        var retryQueueName = $"{queueName}.retry";
+        var retryQueueName = $"{queueName}{_options.RetryQueueSuffix}";
         await ExecuteChannelActionAsync(() =>
         {
             _channel.QueueDeclare(deadLetterQueueName, durable: true, exclusive: false, autoDelete: false);
@@ -121,23 +121,33 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
 
                 if (retryCount < _options.RetryCount)
                 {
+                    var retryPublished = false;
                     try
                     {
                         await RetryAsync(eventArgs, retryCount + 1);
+                        retryPublished = true;
                         await ExecuteChannelActionAsync(() =>
                         {
                             _channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
                         });
                     }
-                    catch
+                    catch (Exception retryException) when (!retryPublished)
                     {
                         await ExecuteChannelActionAsync(() =>
                         {
                             _channel.BasicNack(eventArgs.DeliveryTag, multiple: false, requeue: true);
                         });
                         _logger.LogError(
-                            exception,
+                            retryException,
                             "Failed to publish retry message for command {RoutingKey}; message was requeued.",
+                            routingKey);
+                        return;
+                    }
+                    catch (Exception acknowledgementException)
+                    {
+                        _logger.LogError(
+                            acknowledgementException,
+                            "Retry message was published for command {RoutingKey}, but acknowledging the original delivery failed.",
                             routingKey);
                         return;
                     }
@@ -255,6 +265,12 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
+        Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    public void Dispose()
+    {
         _lifetimeCancellation.Cancel();
 
         try
@@ -279,6 +295,5 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
             _connection.Dispose();
         }
 
-        return ValueTask.CompletedTask;
     }
 }

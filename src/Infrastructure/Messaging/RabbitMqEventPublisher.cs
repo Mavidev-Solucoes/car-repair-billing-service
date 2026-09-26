@@ -7,7 +7,7 @@ using RabbitMQ.Client;
 
 namespace Infrastructure.Messaging;
 
-public sealed class RabbitMqEventPublisher : IEventPublisher, IAsyncDisposable
+public sealed class RabbitMqEventPublisher : IEventPublisher, IDisposable, IAsyncDisposable
 {
     private readonly string _exchangeName;
     private readonly ILogger<RabbitMqEventPublisher> _logger;
@@ -90,8 +90,13 @@ public sealed class RabbitMqEventPublisher : IEventPublisher, IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
+        Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    public void Dispose()
+    {
         _publishLock.Dispose();
         _connection.Dispose();
-        return ValueTask.CompletedTask;
     }
 }
