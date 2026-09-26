@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Restore, Build, Test, Coverage, Sonar and Docker Validation
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+      SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+      MIN_COVERAGE: "80"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect SonarCloud availability
+        id: sonar-config
+        shell: bash
+        run: |
+          if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_PROJECT_KEY" ] && [ -n "$SONAR_ORGANIZATION" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Java 17 for Sonar
+        if: steps.sonar-config.outputs.enabled == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install ReportGenerator
+        run: dotnet tool install --global dotnet-reportgenerator-globaltool
+
+      - name: Install SonarScanner for .NET
+        if: steps.sonar-config.outputs.enabled == 'true'
+        run: dotnet tool install --global dotnet-sonarscanner
+
+      - name: 1. Restore
+        run: dotnet restore ${{ github.workspace }}/CarRepairBillingService.sln
+
+      - name: SonarQube Begin
+        if: steps.sonar-config.outputs.enabled == 'true'
+        run: |
+          ~/.dotnet/tools/dotnet-sonarscanner begin \
+            /k:"$SONAR_PROJECT_KEY" \
+            /o:"$SONAR_ORGANIZATION" \
+            /d:sonar.token="$SONAR_TOKEN" \
+            /d:sonar.host.url="https://sonarcloud.io" \
+            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
+            /s:"$GITHUB_WORKSPACE/sonar-project.properties"
+
+      - name: 2. Build
+        run: dotnet build ${{ github.workspace }}/CarRepairBillingService.sln --configuration Release --no-restore
+
+      - name: 3. Unit Tests
+        shell: bash
+        run: |
+          rm -rf ${{ github.workspace }}/TestResults
+          mkdir -p ${{ github.workspace }}/TestResults
+
+          dotnet test ${{ github.workspace }}/CarRepairBillingService.sln \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --collect:"XPlat Code Coverage;Format=opencover" \
+            --results-directory ${{ github.workspace }}/TestResults
+
+      - name: 4. Generate Code Coverage
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          reports=("${{ github.workspace }}"/TestResults/**/coverage.opencover.xml)
+          if [ "${#reports[@]}" -eq 0 ]; then
+            echo "Coverage reports were not generated. Ensure tests support XPlat Code Coverage collection."
+            exit 1
+          fi
+
+          ~/.dotnet/tools/reportgenerator \
+            "-reports:${{ github.workspace }}/TestResults/**/coverage.opencover.xml" \
+            "-targetdir:${{ github.workspace }}/TestResults/Coverage/report" \
+            "-reporttypes:TextSummary;Cobertura"
+
+          cobertura_file="${{ github.workspace }}/TestResults/Coverage/report/Cobertura.xml"
+          if [ ! -f "$cobertura_file" ]; then
+            echo "Cobertura coverage report was not generated."
+            exit 1
+          fi
+
+          line_coverage=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('$cobertura_file').getroot(); print(f\"{float(root.attrib.get('line-rate', '0')) * 100:.2f}\")")
+
+          if [ -z "$line_coverage" ]; then
+            echo "Unable to parse line coverage from Cobertura.xml"
+            exit 1
+          fi
+
+          echo "Line coverage: ${line_coverage}%"
+
+          awk -v coverage="$line_coverage" -v minimum="$MIN_COVERAGE" 'BEGIN { if (coverage + 0 < minimum + 0) { exit 1 } }' || {
+            echo "Code coverage threshold not met. Required: ${MIN_COVERAGE}%, current: ${line_coverage}%"
+            exit 1
+          }
+
+      - name: 5. SonarQube Analysis
+        if: always() && steps.sonar-config.outputs.enabled == 'true'
+        run: ~/.dotnet/tools/dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+
+      - name: 5.1 Sonar Quality Gate
+        id: sonar-quality-gate
+        if: always() && steps.sonar-config.outputs.enabled == 'true'
+        uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b # v1.2.0
+        timeout-minutes: 10
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+        with:
+          scanMetadataReportFile: ${{ github.workspace }}/.sonarqube/out/.sonar/report-task.txt
+
+      - name: Enforce Sonar Quality Gate
+        if: always() && steps.sonar-config.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          quality_gate_status="${{ steps.sonar-quality-gate.outputs.quality-gate-status }}"
+          echo "Sonar quality gate status: ${quality_gate_status}"
+
+          if [ "$quality_gate_status" != "PASSED" ] && [ "$quality_gate_status" != "OK" ]; then
+            echo "Sonar quality gate failed with status: ${quality_gate_status}"
+            exit 1
+          fi
+
+      - name: SonarQube skipped notice
+        if: steps.sonar-config.outputs.enabled != 'true'
+        run: echo "SonarQube analysis skipped because required SonarCloud secrets are not configured in this context."
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 6. Docker Build Validation
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ github.workspace }}
+          file: ${{ github.workspace }}/src/Api/Dockerfile
+          push: false
+          tags: car-repair-billing-service:ci-validation
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
