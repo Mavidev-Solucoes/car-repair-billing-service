@@ -49,10 +49,8 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Coverage and Report Tools
-        run: |
-          dotnet tool install --global coverlet.console
-          dotnet tool install --global dotnet-reportgenerator-globaltool
+      - name: Install ReportGenerator
+        run: dotnet tool install --global dotnet-reportgenerator-globaltool
 
       - name: Install SonarScanner for .NET
         if: steps.sonar-config.outputs.enabled == 'true'
@@ -76,12 +74,19 @@ jobs:
         run: dotnet build ${{ github.workspace }}/CarRepairBillingService.sln --configuration Release --no-restore
 
       - name: Discover test projects
+        id: discover-tests
         shell: bash
         run: |
-          mapfile -t test_projects < <(find ${{ github.workspace }} -type f \( -name "*Tests.csproj" -o -name "*Test*.csproj" \) | sort)
+          mapfile -t test_projects < <(
+            find ${{ github.workspace }} -type f -name "*.csproj" | sort | while IFS= read -r project; do
+              if grep -Eq '<IsTestProject>true</IsTestProject>|<PackageReference Include="Microsoft.NET.Test.Sdk"|<PackageReference Include="xunit"|<PackageReference Include="NUnit"|<PackageReference Include="MSTest\.TestFramework"' "$project"; then
+                echo "$project"
+              fi
+            done
+          )
 
           if [ "${#test_projects[@]}" -eq 0 ]; then
-            echo "No test projects found. Add xUnit test projects to run Unit Tests and Coverage stages."
+            echo "No test projects found. Ensure test projects define IsTestProject=true or reference a supported test SDK/package."
             exit 1
           fi
 
@@ -94,22 +99,15 @@ jobs:
 
           while IFS= read -r project; do
             project_name=$(basename "$project" .csproj)
-            project_dir=$(dirname "$project")
+            echo "Running unit tests with coverage for $project"
 
-            dotnet build "$project" --configuration Release --no-restore
-
-            assembly_path=$(find "$project_dir/bin/Release" -type f -name "${project_name}.dll" ! -path "*/ref/*" | head -n 1)
-            if [ -z "$assembly_path" ] || [ ! -f "$assembly_path" ]; then
-              echo "Unable to locate built test assembly for $project"
-              exit 1
-            fi
-
-            echo "Running tests with Coverlet for $project"
-            ~/.dotnet/tools/coverlet "$assembly_path" \
-              --target "dotnet" \
-              --targetargs "vstest \"$assembly_path\"" \
-              --output "${{ github.workspace }}/TestResults/Coverage/raw/${project_name}.opencover.xml" \
-              --format opencover
+            dotnet test "$project" \
+              --configuration Release \
+              --no-build \
+              --verbosity normal \
+              /p:CollectCoverage=true \
+              /p:CoverletOutputFormat=opencover \
+              /p:CoverletOutput="${{ github.workspace }}/TestResults/Coverage/raw/${project_name}.opencover.xml"
           done < ${{ github.workspace }}/test-projects.txt
 
       - name: 4. Generate Code Coverage
@@ -118,7 +116,7 @@ jobs:
           shopt -s nullglob
           reports=(${{ github.workspace }}/TestResults/Coverage/raw/*.opencover.xml)
           if [ "${#reports[@]}" -eq 0 ]; then
-            echo "Coverage reports were not generated."
+            echo "Coverage reports were not generated. Ensure test projects include Coverlet integration."
             exit 1
           fi
 
@@ -163,5 +161,15 @@ jobs:
         if: steps.sonar-config.outputs.enabled != 'true'
         run: echo "SonarQube analysis skipped because required SonarCloud secrets are not configured in this context."
 
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: 6. Docker Build Validation
-        run: docker build -f ${{ github.workspace }}/src/Api/Dockerfile ${{ github.workspace }} --build-arg BUILD_CONFIGURATION=Release
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ github.workspace }}
+          file: ${{ github.workspace }}/src/Api/Dockerfile
+          push: false
+          tags: car-repair-billing-service:ci-validation
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
