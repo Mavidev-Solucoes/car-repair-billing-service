@@ -8,5 +8,7 @@ public interface IPaymentRepository
 
     Task<Payment?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
 
+    Task<IReadOnlyCollection<Payment>> ListAsync(CancellationToken cancellationToken);
+
     Task<decimal> GetReservedAmountByBudgetIdAsync(Guid budgetId, CancellationToken cancellationToken);
 }

@@ -26,6 +26,14 @@ public sealed class PaymentRepository : IPaymentRepository
             .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
     }
 
+    public async Task<IReadOnlyCollection<Payment>> ListAsync(CancellationToken cancellationToken)
+    {
+        return await _context.Payments
+            .Include(x => x.Transactions)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+    }
+
     public Task<decimal> GetReservedAmountByBudgetIdAsync(Guid budgetId, CancellationToken cancellationToken)
     {
         return _context.Payments
