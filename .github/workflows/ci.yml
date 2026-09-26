@@ -16,6 +16,10 @@ jobs:
   ci:
     name: Restore, Build, Test, Coverage, Sonar and Docker Validation
     runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+      SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
 
     steps:
       - name: Checkout
@@ -23,34 +27,41 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Detect SonarCloud availability
+        id: sonar-config
+        run: |
+          if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_PROJECT_KEY" ] && [ -n "$SONAR_ORGANIZATION" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
       - name: Setup Java 17 for Sonar
-        if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_PROJECT_KEY != '' && secrets.SONAR_ORGANIZATION != '' }}
+        if: steps.sonar-config.outputs.enabled == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Install ReportGenerator
-        run: dotnet tool install --global dotnet-reportgenerator-globaltool
+      - name: Install Coverage and Report Tools
+        run: |
+          dotnet tool install --global coverlet.console
+          dotnet tool install --global dotnet-reportgenerator-globaltool
 
       - name: Install SonarScanner for .NET
-        if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_PROJECT_KEY != '' && secrets.SONAR_ORGANIZATION != '' }}
+        if: steps.sonar-config.outputs.enabled == 'true'
         run: dotnet tool install --global dotnet-sonarscanner
 
       - name: 1. Restore
         run: dotnet restore ${{ github.workspace }}/CarRepairBillingService.sln
 
       - name: SonarQube Begin
-        if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_PROJECT_KEY != '' && secrets.SONAR_ORGANIZATION != '' }}
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
-          SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+        if: steps.sonar-config.outputs.enabled == 'true'
         run: |
           dotnet sonarscanner begin \
             /k:"$SONAR_PROJECT_KEY" \
@@ -80,14 +91,32 @@ jobs:
 
           while IFS= read -r project; do
             project_name=$(basename "$project" .csproj)
-            echo "Running tests with coverage for $project"
+            project_dir=$(dirname "$project")
 
-            dotnet test "$project" \
-              --configuration Release \
-              --no-build \
-              /p:CollectCoverage=true \
-              /p:CoverletOutputFormat=opencover \
-              /p:CoverletOutput="${{ github.workspace }}/TestResults/Coverage/raw/${project_name}.opencover.xml"
+            target_framework=$(sed -n 's:.*<TargetFramework>\(.*\)</TargetFramework>.*:\1:p' "$project" | head -n 1)
+            if [ -z "$target_framework" ]; then
+              target_framework=$(sed -n 's:.*<TargetFrameworks>\(.*\)</TargetFrameworks>.*:\1:p' "$project" | head -n 1 | cut -d';' -f1)
+            fi
+
+            if [ -z "$target_framework" ]; then
+              echo "Unable to determine target framework for $project"
+              exit 1
+            fi
+
+            dotnet build "$project" --configuration Release --no-restore
+
+            assembly_path="$project_dir/bin/Release/$target_framework/${project_name}.dll"
+            if [ ! -f "$assembly_path" ]; then
+              echo "Test assembly not found at $assembly_path"
+              exit 1
+            fi
+
+            echo "Running tests with Coverlet for $project"
+            ~/.dotnet/tools/coverlet "$assembly_path" \
+              --target "dotnet" \
+              --targetargs "test \"$project\" --configuration Release --no-build --verbosity normal" \
+              --output "${{ github.workspace }}/TestResults/Coverage/raw/${project_name}.opencover.xml" \
+              --format opencover
           done < ${{ github.workspace }}/test-projects.txt
 
       - name: 4. Generate Code Coverage
@@ -95,7 +124,7 @@ jobs:
           shopt -s nullglob
           reports=(${{ github.workspace }}/TestResults/Coverage/raw/*.opencover.xml)
           if [ "${#reports[@]}" -eq 0 ]; then
-            echo "Coverage reports were not generated. Ensure test projects include Coverlet support."
+            echo "Coverage reports were not generated."
             exit 1
           fi
 
@@ -126,22 +155,18 @@ jobs:
           }
 
       - name: 5. SonarQube Analysis
-        if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_PROJECT_KEY != '' && secrets.SONAR_ORGANIZATION != '' }}
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        if: steps.sonar-config.outputs.enabled == 'true'
         run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: 5.1 Sonar Quality Gate
-        if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_PROJECT_KEY != '' && secrets.SONAR_ORGANIZATION != '' }}
+        if: steps.sonar-config.outputs.enabled == 'true'
         uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b
         timeout-minutes: 10
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           scanMetadataReportFile: ${{ github.workspace }}/.sonarqube/out/.sonar/report-task.txt
 
       - name: SonarQube skipped notice
-        if: ${{ secrets.SONAR_TOKEN == '' || secrets.SONAR_PROJECT_KEY == '' || secrets.SONAR_ORGANIZATION == '' }}
+        if: steps.sonar-config.outputs.enabled != 'true'
         run: echo "SonarQube analysis skipped because required SonarCloud secrets are not configured in this context."
 
       - name: 6. Docker Build Validation
