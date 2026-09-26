@@ -19,6 +19,7 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly JsonSerializerOptions _serializerOptions = new(JsonSerializerDefaults.Web);
     private readonly ConcurrentDictionary<string, byte> _subscriptions = new();
+    private readonly ConcurrentDictionary<string, string> _consumerTags = new();
 
     public RabbitMqCommandConsumer(IOptions<RabbitMqOptions> options, ILogger<RabbitMqCommandConsumer> logger)
     {
@@ -53,7 +54,9 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_subscriptions.TryAdd(queueName, 0))
+        var subscriptionKey = $"{queueName}:{routingKey}:{typeof(TCommand).FullName}";
+
+        if (!_subscriptions.TryAdd(subscriptionKey, 0))
         {
             return;
         }
@@ -110,10 +113,7 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
             }
             catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
             {
-                await ExecuteChannelActionAsync(() =>
-                {
-                    _channel.BasicNack(eventArgs.DeliveryTag, multiple: false, requeue: true);
-                });
+                return;
             }
             catch (Exception exception)
             {
@@ -165,10 +165,11 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
             }
         };
 
-        await ExecuteChannelActionAsync(() =>
+        var consumerTag = await ExecuteChannelActionAsync(() =>
         {
-            _channel.BasicConsume(queue: queueName, autoAck: false, consumer: consumer);
+            return _channel.BasicConsume(queue: queueName, autoAck: false, consumer: consumer);
         });
+        _consumerTags.TryAdd(subscriptionKey, consumerTag);
 
         _logger.LogInformation("Subscribed command consumer to queue {QueueName} with routing key {RoutingKey}.", queueName, routingKey);
 
@@ -199,10 +200,19 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
 
     private async Task ExecuteChannelActionAsync(Action action)
     {
-        await _channelLock.WaitAsync();
-        try
+        await ExecuteChannelActionAsync(() =>
         {
             action();
+            return 0;
+        });
+    }
+
+    private async Task<TResult> ExecuteChannelActionAsync<TResult>(Func<TResult> action)
+    {
+        await _channelLock.WaitAsync(_lifetimeCancellation.Token);
+        try
+        {
+            return action();
         }
         finally
         {
@@ -246,10 +256,29 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         _lifetimeCancellation.Cancel();
-        _lifetimeCancellation.Dispose();
-        _channelLock.Dispose();
-        _channel.Dispose();
-        _connection.Dispose();
+
+        try
+        {
+            if (_channel.IsOpen)
+            {
+                foreach (var consumerTag in _consumerTags.Values)
+                {
+                    _channel.BasicCancel(consumerTag);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Error while cancelling RabbitMQ consumers during shutdown.");
+        }
+        finally
+        {
+            _lifetimeCancellation.Dispose();
+            _channelLock.Dispose();
+            _channel.Dispose();
+            _connection.Dispose();
+        }
+
         return ValueTask.CompletedTask;
     }
 }
