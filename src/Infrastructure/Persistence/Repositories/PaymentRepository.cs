@@ -1,0 +1,27 @@
+using Application.Abstractions.Persistence;
+using Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+
+namespace Infrastructure.Persistence.Repositories;
+
+public sealed class PaymentRepository : IPaymentRepository
+{
+    private readonly ApplicationDbContext _context;
+
+    public PaymentRepository(ApplicationDbContext context)
+    {
+        _context = context;
+    }
+
+    public async Task AddAsync(Payment payment, CancellationToken cancellationToken)
+    {
+        await _context.Payments.AddAsync(payment, cancellationToken);
+    }
+
+    public Task<Payment?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    {
+        return _context.Payments
+            .Include(x => x.Transactions)
+            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
+}
