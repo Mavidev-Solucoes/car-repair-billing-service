@@ -93,28 +93,18 @@ jobs:
             project_name=$(basename "$project" .csproj)
             project_dir=$(dirname "$project")
 
-            target_framework=$(sed -n 's:.*<TargetFramework>\(.*\)</TargetFramework>.*:\1:p' "$project" | head -n 1)
-            if [ -z "$target_framework" ]; then
-              target_framework=$(sed -n 's:.*<TargetFrameworks>\(.*\)</TargetFrameworks>.*:\1:p' "$project" | head -n 1 | cut -d';' -f1)
-            fi
-
-            if [ -z "$target_framework" ]; then
-              echo "Unable to determine target framework for $project"
-              exit 1
-            fi
-
             dotnet build "$project" --configuration Release --no-restore
 
-            assembly_path="$project_dir/bin/Release/$target_framework/${project_name}.dll"
-            if [ ! -f "$assembly_path" ]; then
-              echo "Test assembly not found at $assembly_path"
+            assembly_path=$(find "$project_dir/bin/Release" -type f -name "${project_name}.dll" ! -path "*/ref/*" | head -n 1)
+            if [ -z "$assembly_path" ] || [ ! -f "$assembly_path" ]; then
+              echo "Unable to locate built test assembly for $project"
               exit 1
             fi
 
             echo "Running tests with Coverlet for $project"
             ~/.dotnet/tools/coverlet "$assembly_path" \
               --target "dotnet" \
-              --targetargs "test \"$project\" --configuration Release --no-build --verbosity normal" \
+              --targetargs "vstest "$assembly_path"" \
               --output "${{ github.workspace }}/TestResults/Coverage/raw/${project_name}.opencover.xml" \
               --format opencover
           done < ${{ github.workspace }}/test-projects.txt
