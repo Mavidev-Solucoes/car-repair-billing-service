@@ -13,6 +13,7 @@ public sealed class FakePaymentGatewayTests
 
         Assert.True(result.IsSuccess);
         Assert.StartsWith("fake-success-", result.ExternalReference);
+        Assert.Equal("Simulated successful payment of 120.00.", result.Message);
     }
 
     [Fact]
@@ -24,5 +25,6 @@ public sealed class FakePaymentGatewayTests
 
         Assert.False(result.IsSuccess);
         Assert.StartsWith("fake-failure-", result.ExternalReference);
+        Assert.Equal("Simulated payment failure.", result.Message);
     }
 }

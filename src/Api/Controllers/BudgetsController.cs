@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Api.Controllers;
 
 [ApiController]
+[Route("api/budgets")]
 [Route("budgets")]
 public sealed class BudgetsController : ControllerBase
 {
@@ -26,7 +27,7 @@ public sealed class BudgetsController : ControllerBase
                 request.Items.Select(x => new CreateBudgetItemModel(x.Description, x.UnitPrice, x.Quantity)).ToList()),
             cancellationToken);
 
-        return Created($"/budgets/{budgetId}", new { id = budgetId });
+        return Created($"/api/budgets/{budgetId}", new { id = budgetId });
     }
 
     [HttpGet("{budgetId:guid}")]

@@ -9,7 +9,8 @@ public sealed class QueryMappingProfile : Profile
 {
     public QueryMappingProfile()
     {
-        CreateMap<BudgetItem, BudgetItemResponse>();
+        CreateMap<BudgetItem, BudgetItemResponse>()
+            .ForCtorParam(nameof(BudgetItemResponse.Total), options => options.MapFrom(source => source.Total));
 
         CreateMap<Budget, BudgetResponse>()
             .ForCtorParam(nameof(BudgetResponse.TotalAmount), options => options.MapFrom(source => source.TotalAmount));

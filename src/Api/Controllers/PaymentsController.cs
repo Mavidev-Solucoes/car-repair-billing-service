@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Api.Controllers;
 
 [ApiController]
+[Route("api/payments")]
 [Route("payments")]
 public sealed class PaymentsController : ControllerBase
 {
@@ -21,7 +22,7 @@ public sealed class PaymentsController : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreatePaymentRequest request, CancellationToken cancellationToken)
     {
         var paymentId = await _sender.Send(new CreatePaymentCommand(request.BudgetId, request.Amount), cancellationToken);
-        return Created($"/payments/{paymentId}", new { id = paymentId });
+        return Created($"/api/payments/{paymentId}", new { id = paymentId });
     }
 
     [HttpGet("{paymentId:guid}")]
