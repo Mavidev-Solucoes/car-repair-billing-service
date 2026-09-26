@@ -20,6 +20,7 @@ jobs:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
       SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+      MIN_COVERAGE: "80"
 
     steps:
       - name: Checkout
@@ -67,67 +68,33 @@ jobs:
             /o:"$SONAR_ORGANIZATION" \
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url="https://sonarcloud.io" \
-            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" \
             /s:"$GITHUB_WORKSPACE/sonar-project.properties"
 
       - name: 2. Build
         run: dotnet build ${{ github.workspace }}/CarRepairBillingService.sln --configuration Release --no-restore
 
-      - name: Discover test projects
-        shell: bash
-        run: |
-          mapfile -t test_projects < <(
-            dotnet sln ${{ github.workspace }}/CarRepairBillingService.sln list \
-              | awk 'NR > 2 {print $0}' \
-              | sed 's/^[[:space:]]*//' \
-              | grep -Ei '(test|tests).*\.csproj$' \
-              | while IFS= read -r project; do
-                  if [ -n "$project" ]; then
-                    if [[ "$project" = /* ]]; then
-                      echo "$project"
-                    else
-                      echo "${{ github.workspace }}/$project"
-                    fi
-                  fi
-                done
-          )
-
-          if [ "${#test_projects[@]}" -eq 0 ]; then
-            echo "No test projects found in solution."
-            exit 1
-          fi
-
-          printf '%s\n' "${test_projects[@]}" > ${{ github.workspace }}/test-projects.txt
-
       - name: 3. Unit Tests
         shell: bash
         run: |
-          mkdir -p ${{ github.workspace }}/TestResults
-
-          while IFS= read -r project; do
-            project_name=$(basename "$project" .csproj)
-            echo "Running unit tests with coverage for $project"
-
-            dotnet test "$project" \
-              --configuration Release \
-              --no-build \
-              --verbosity normal \
-              --collect:"XPlat Code Coverage;Format=opencover" \
-              --results-directory "${{ github.workspace }}/TestResults/${project_name}"
-          done < ${{ github.workspace }}/test-projects.txt
+          dotnet test ${{ github.workspace }}/CarRepairBillingService.sln \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --collect:"XPlat Code Coverage;Format=opencover"
 
       - name: 4. Generate Code Coverage
         shell: bash
         run: |
           shopt -s globstar nullglob
-          reports=("${{ github.workspace }}"/TestResults/**/coverage.opencover.xml)
+          reports=("${{ github.workspace }}"/**/coverage.opencover.xml)
           if [ "${#reports[@]}" -eq 0 ]; then
             echo "Coverage reports were not generated. Ensure tests support XPlat Code Coverage collection."
             exit 1
           fi
 
           ~/.dotnet/tools/reportgenerator \
-            "-reports:${{ github.workspace }}/TestResults/**/coverage.opencover.xml" \
+            "-reports:${{ github.workspace }}/**/coverage.opencover.xml" \
             "-targetdir:${{ github.workspace }}/TestResults/Coverage/report" \
             "-reporttypes:TextSummary;Cobertura"
 
@@ -146,8 +113,8 @@ jobs:
 
           echo "Line coverage: ${line_coverage}%"
 
-          awk -v coverage="$line_coverage" 'BEGIN { if (coverage + 0 < 80) { exit 1 } }' || {
-            echo "Code coverage threshold not met. Required: 80%, current: ${line_coverage}%"
+          awk -v coverage="$line_coverage" -v minimum="$MIN_COVERAGE" 'BEGIN { if (coverage + 0 < minimum + 0) { exit 1 } }' || {
+            echo "Code coverage threshold not met. Required: ${MIN_COVERAGE}%, current: ${line_coverage}%"
             exit 1
           }
 
