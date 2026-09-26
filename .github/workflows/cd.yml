@@ -1,0 +1,68 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-image:
+    name: Build and Publish Docker Image
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository && (github.event.workflow_run.head_branch == 'main' || github.event.workflow_run.head_branch == 'develop') }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout commit from successful CI run
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Prepare image name
+        id: image
+        shell: bash
+        run: |
+          owner="$(echo "${{ github.event.workflow_run.head_repository.owner.login }}" | tr '[:upper:]' '[:lower:]')"
+          echo "name=ghcr.io/${owner}/car-repair-billing-service" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.event.workflow_run.head_repository.owner.login }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare image tags
+        id: tags
+        shell: bash
+        run: |
+          tags="${{ steps.image.outputs.name }}:${{ github.event.workflow_run.head_sha }}"
+          if [ "${{ github.event.workflow_run.head_branch }}" = "main" ]; then
+            tags="${tags}"$'\n'"${{ steps.image.outputs.name }}:latest"
+          fi
+          {
+            echo "value<<EOF"
+            echo "$tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ github.workspace }}
+          file: ${{ github.workspace }}/src/Api/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
