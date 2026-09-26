@@ -158,6 +158,7 @@ jobs:
         run: ~/.dotnet/tools/dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: 5.1 Sonar Quality Gate
+        id: sonar-quality-gate
         if: steps.sonar-config.outputs.enabled == 'true'
         uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b
         timeout-minutes: 10
@@ -165,6 +166,18 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           scanMetadataReportFile: ${{ github.workspace }}/.sonarqube/out/.sonar/report-task.txt
+
+      - name: Enforce Sonar Quality Gate
+        if: steps.sonar-config.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          quality_gate_status="${{ steps.sonar-quality-gate.outputs.quality-gate-status }}"
+          echo "Sonar quality gate status: ${quality_gate_status}"
+
+          if [ "$quality_gate_status" != "PASSED" ] && [ "$quality_gate_status" != "OK" ]; then
+            echo "Sonar quality gate failed with status: ${quality_gate_status}"
+            exit 1
+          fi
 
       - name: SonarQube skipped notice
         if: steps.sonar-config.outputs.enabled != 'true'
