@@ -68,7 +68,7 @@ jobs:
             /o:"$SONAR_ORGANIZATION" \
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url="https://sonarcloud.io" \
-            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" \
+            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
             /s:"$GITHUB_WORKSPACE/sonar-project.properties"
 
       - name: 2. Build
@@ -77,24 +77,28 @@ jobs:
       - name: 3. Unit Tests
         shell: bash
         run: |
+          rm -rf ${{ github.workspace }}/TestResults
+          mkdir -p ${{ github.workspace }}/TestResults
+
           dotnet test ${{ github.workspace }}/CarRepairBillingService.sln \
             --configuration Release \
             --no-build \
             --verbosity normal \
-            --collect:"XPlat Code Coverage;Format=opencover"
+            --collect:"XPlat Code Coverage;Format=opencover" \
+            --results-directory ${{ github.workspace }}/TestResults
 
       - name: 4. Generate Code Coverage
         shell: bash
         run: |
           shopt -s globstar nullglob
-          reports=("${{ github.workspace }}"/**/coverage.opencover.xml)
+          reports=("${{ github.workspace }}"/TestResults/**/coverage.opencover.xml)
           if [ "${#reports[@]}" -eq 0 ]; then
             echo "Coverage reports were not generated. Ensure tests support XPlat Code Coverage collection."
             exit 1
           fi
 
           ~/.dotnet/tools/reportgenerator \
-            "-reports:${{ github.workspace }}/**/coverage.opencover.xml" \
+            "-reports:${{ github.workspace }}/TestResults/**/coverage.opencover.xml" \
             "-targetdir:${{ github.workspace }}/TestResults/Coverage/report" \
             "-reporttypes:TextSummary;Cobertura"
 
@@ -124,7 +128,7 @@ jobs:
 
       - name: 5.1 Sonar Quality Gate
         id: sonar-quality-gate
-        if: steps.sonar-config.outputs.enabled == 'true'
+        if: always() && steps.sonar-config.outputs.enabled == 'true'
         uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b # v1.2.0
         timeout-minutes: 10
         env:
@@ -134,7 +138,7 @@ jobs:
           scanMetadataReportFile: ${{ github.workspace }}/.sonarqube/out/.sonar/report-task.txt
 
       - name: Enforce Sonar Quality Gate
-        if: steps.sonar-config.outputs.enabled == 'true'
+        if: always() && steps.sonar-config.outputs.enabled == 'true'
         shell: bash
         run: |
           quality_gate_status="${{ steps.sonar-quality-gate.outputs.quality-gate-status }}"

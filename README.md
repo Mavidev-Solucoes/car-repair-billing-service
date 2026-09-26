@@ -11,10 +11,10 @@ To enable SonarCloud stages in the CI pipeline, configure these repository secre
 
 ## CI Quality Gates
 
-The CI workflow validates pull requests to `main` and pushes to `main`/`develop` with these enforced checks:
+The CI workflow validates pull requests to `main` and pushes to `main`/`develop` with these checks:
 
 - Build must succeed.
 - Unit tests must succeed.
 - Coverage must be at least **80%**.
-- Sonar quality gate must pass (when SonarCloud secrets are available).
+- Sonar quality gate must pass (this check runs only when SonarCloud secrets are available in the workflow context).
 - Docker image build validation must succeed.
