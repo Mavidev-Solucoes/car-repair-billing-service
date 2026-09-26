@@ -27,12 +27,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate SonarCloud secrets
+      - name: Detect SonarCloud availability
+        id: sonar-config
         shell: bash
         run: |
-          if [ -z "$SONAR_TOKEN" ] || [ -z "$SONAR_PROJECT_KEY" ] || [ -z "$SONAR_ORGANIZATION" ]; then
-            echo "Missing required SonarCloud secrets: SONAR_TOKEN, SONAR_PROJECT_KEY, SONAR_ORGANIZATION"
-            exit 1
+          if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_PROJECT_KEY" ] && [ -n "$SONAR_ORGANIZATION" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup .NET 8
@@ -41,6 +43,7 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Setup Java 17 for Sonar
+        if: steps.sonar-config.outputs.enabled == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -50,12 +53,14 @@ jobs:
         run: dotnet tool install --global dotnet-reportgenerator-globaltool
 
       - name: Install SonarScanner for .NET
+        if: steps.sonar-config.outputs.enabled == 'true'
         run: dotnet tool install --global dotnet-sonarscanner
 
       - name: 1. Restore
         run: dotnet restore ${{ github.workspace }}/CarRepairBillingService.sln
 
       - name: SonarQube Begin
+        if: steps.sonar-config.outputs.enabled == 'true'
         run: |
           ~/.dotnet/tools/dotnet-sonarscanner begin \
             /k:"$SONAR_PROJECT_KEY" \
@@ -126,17 +131,16 @@ jobs:
             "-targetdir:${{ github.workspace }}/TestResults/Coverage/report" \
             "-reporttypes:TextSummary;Cobertura"
 
-          summary_file="${{ github.workspace }}/TestResults/Coverage/report/Summary.txt"
-          if [ ! -f "$summary_file" ]; then
-            echo "Coverage summary file was not generated."
+          cobertura_file="${{ github.workspace }}/TestResults/Coverage/report/Cobertura.xml"
+          if [ ! -f "$cobertura_file" ]; then
+            echo "Cobertura coverage report was not generated."
             exit 1
           fi
 
-          line_coverage=$(grep -E '^Line coverage:' "$summary_file" | sed -E 's/.*: ([0-9]+(\.[0-9]+)?)%.*/\1/' | head -n 1)
+          line_coverage=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('$cobertura_file').getroot(); print(f\"{float(root.attrib.get('line-rate', '0')) * 100:.2f}\")")
 
           if [ -z "$line_coverage" ]; then
-            echo "Unable to parse line coverage from Summary.txt"
-            cat "$summary_file"
+            echo "Unable to parse line coverage from Cobertura.xml"
             exit 1
           fi
 
@@ -148,11 +152,13 @@ jobs:
           }
 
       - name: 5. SonarQube Analysis
+        if: steps.sonar-config.outputs.enabled == 'true'
         run: ~/.dotnet/tools/dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: 5.1 Sonar Quality Gate
         id: sonar-quality-gate
-        uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b
+        if: steps.sonar-config.outputs.enabled == 'true'
+        uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b # v1.2.0
         timeout-minutes: 10
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -161,6 +167,7 @@ jobs:
           scanMetadataReportFile: ${{ github.workspace }}/.sonarqube/out/.sonar/report-task.txt
 
       - name: Enforce Sonar Quality Gate
+        if: steps.sonar-config.outputs.enabled == 'true'
         shell: bash
         run: |
           quality_gate_status="${{ steps.sonar-quality-gate.outputs.quality-gate-status }}"
@@ -170,6 +177,10 @@ jobs:
             echo "Sonar quality gate failed with status: ${quality_gate_status}"
             exit 1
           fi
+
+      - name: SonarQube skipped notice
+        if: steps.sonar-config.outputs.enabled != 'true'
+        run: echo "SonarQube analysis skipped because required SonarCloud secrets are not configured in this context."
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
