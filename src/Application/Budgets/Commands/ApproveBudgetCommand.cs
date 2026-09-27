@@ -1,9 +1,18 @@
 using Application.Abstractions.Persistence;
+using FluentValidation;
 using MediatR;
 
 namespace Application.Budgets.Commands;
 
 public sealed record ApproveBudgetCommand(Guid BudgetId) : IRequest;
+
+public sealed class ApproveBudgetCommandValidator : AbstractValidator<ApproveBudgetCommand>
+{
+    public ApproveBudgetCommandValidator()
+    {
+        RuleFor(x => x.BudgetId).NotEmpty();
+    }
+}
 
 public sealed class ApproveBudgetCommandHandler : IRequestHandler<ApproveBudgetCommand>
 {

@@ -10,6 +10,7 @@ public sealed class RejectPaymentCommandValidator : AbstractValidator<RejectPaym
 {
     public RejectPaymentCommandValidator()
     {
+        RuleFor(x => x.PaymentId).NotEmpty();
         RuleFor(x => x.Reason).NotEmpty().MaximumLength(500);
     }
 }

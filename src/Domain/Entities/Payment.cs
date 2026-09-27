@@ -14,6 +14,16 @@ public sealed class Payment : Entity
 
     public Payment(Guid budgetId, decimal amount)
     {
+        if (budgetId == Guid.Empty)
+        {
+            throw new ArgumentException("Budget identifier is required.", nameof(budgetId));
+        }
+
+        if (amount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(amount), "Amount must be greater than zero.");
+        }
+
         Id = Guid.NewGuid();
         BudgetId = budgetId;
         Amount = amount;
@@ -41,6 +51,13 @@ public sealed class Payment : Entity
 
     public void AddTransaction(PaymentTransaction transaction)
     {
+        ArgumentNullException.ThrowIfNull(transaction);
+
+        if (Status != PaymentStatus.Pending)
+        {
+            throw new InvalidOperationException("Transactions can only be added to pending payments.");
+        }
+
         transaction.SetPaymentId(Id);
         _transactions.Add(transaction);
     }
@@ -64,9 +81,14 @@ public sealed class Payment : Entity
             throw new InvalidOperationException("Only pending payments can be rejected.");
         }
 
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("Rejection reason is required.", nameof(reason));
+        }
+
         Status = PaymentStatus.Rejected;
-        RejectionReason = reason;
+        RejectionReason = reason.Trim();
         RejectedAtUtc = DateTime.UtcNow;
-        RaiseDomainEvent(new PaymentRejectedDomainEvent(Id, reason));
+        RaiseDomainEvent(new PaymentRejectedDomainEvent(Id, RejectionReason));
     }
 }

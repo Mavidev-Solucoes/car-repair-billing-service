@@ -8,3 +8,8 @@ public interface IEventPublisher
         CancellationToken cancellationToken = default)
         where TEvent : class;
 }
+
+public interface IDomainEventDispatcher
+{
+    Task DispatchAsync(IReadOnlyCollection<Domain.Common.IDomainEvent> domainEvents, CancellationToken cancellationToken);
+}

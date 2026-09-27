@@ -14,10 +14,22 @@ public sealed class Budget : Entity
 
     public Budget(string customerName, IEnumerable<BudgetItem> items)
     {
+        if (string.IsNullOrWhiteSpace(customerName))
+        {
+            throw new ArgumentException("Customer name is required.", nameof(customerName));
+        }
+
+        var budgetItems = items?.ToList() ?? throw new ArgumentNullException(nameof(items));
+
+        if (budgetItems.Count == 0)
+        {
+            throw new ArgumentException("At least one budget item is required.", nameof(items));
+        }
+
         Id = Guid.NewGuid();
-        CustomerName = customerName;
+        CustomerName = customerName.Trim();
         Status = BudgetStatus.Pending;
-        foreach (var item in items)
+        foreach (var item in budgetItems)
         {
             item.SetBudgetId(Id);
             _items.Add(item);
@@ -62,9 +74,14 @@ public sealed class Budget : Entity
             throw new InvalidOperationException("Only pending budgets can be rejected.");
         }
 
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("Rejection reason is required.", nameof(reason));
+        }
+
         Status = BudgetStatus.Rejected;
-        RejectionReason = reason;
+        RejectionReason = reason.Trim();
         RejectedAtUtc = DateTime.UtcNow;
-        RaiseDomainEvent(new BudgetRejectedDomainEvent(Id, reason));
+        RaiseDomainEvent(new BudgetRejectedDomainEvent(Id, RejectionReason));
     }
 }

@@ -2,11 +2,20 @@ using Application.Abstractions.Payments;
 using Application.Abstractions.Persistence;
 using Domain.Entities;
 using Domain.Enums;
+using FluentValidation;
 using MediatR;
 
 namespace Application.Payments.Commands;
 
 public sealed record ApprovePaymentCommand(Guid PaymentId, bool SimulateFailure) : IRequest;
+
+public sealed class ApprovePaymentCommandValidator : AbstractValidator<ApprovePaymentCommand>
+{
+    public ApprovePaymentCommandValidator()
+    {
+        RuleFor(x => x.PaymentId).NotEmpty();
+    }
+}
 
 public sealed class ApprovePaymentCommandHandler : IRequestHandler<ApprovePaymentCommand>
 {

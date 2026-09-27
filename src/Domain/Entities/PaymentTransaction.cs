@@ -8,10 +8,20 @@ public sealed class PaymentTransaction
 
     public PaymentTransaction(bool isSuccess, string externalReference, string message)
     {
+        if (string.IsNullOrWhiteSpace(externalReference))
+        {
+            throw new ArgumentException("External reference is required.", nameof(externalReference));
+        }
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            throw new ArgumentException("Message is required.", nameof(message));
+        }
+
         Id = Guid.NewGuid();
         IsSuccess = isSuccess;
-        ExternalReference = externalReference;
-        Message = message;
+        ExternalReference = externalReference.Trim();
+        Message = message.Trim();
         CreatedAtUtc = DateTime.UtcNow;
     }
 

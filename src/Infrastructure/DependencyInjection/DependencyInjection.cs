@@ -18,7 +18,8 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString("Database")
             ?? throw new InvalidOperationException("Connection string 'Database' was not found.");
 
-        services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddDbContext<ApplicationDbContext>(options =>
+            options.UseNpgsql(connectionString, npgsqlOptions => npgsqlOptions.EnableRetryOnFailure()));
 
         services.AddScoped<IBudgetRepository, BudgetRepository>();
         services.AddScoped<IPaymentRepository, PaymentRepository>();
@@ -27,6 +28,7 @@ public static class DependencyInjection
         services.Configure<RabbitMqOptions>(configuration.GetSection(RabbitMqOptions.SectionName));
         services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
         services.AddSingleton<ICommandConsumer, RabbitMqCommandConsumer>();
+        services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
 
         return services;
     }

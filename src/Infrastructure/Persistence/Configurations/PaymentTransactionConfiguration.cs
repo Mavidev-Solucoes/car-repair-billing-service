@@ -16,5 +16,6 @@ public sealed class PaymentTransactionConfiguration : IEntityTypeConfiguration<P
         builder.Property(x => x.ExternalReference).HasMaxLength(200).IsRequired();
         builder.Property(x => x.Message).HasMaxLength(500).IsRequired();
         builder.Property(x => x.CreatedAtUtc).IsRequired();
+        builder.HasIndex(x => new { x.PaymentId, x.CreatedAtUtc });
     }
 }
