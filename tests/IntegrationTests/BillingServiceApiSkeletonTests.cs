@@ -11,7 +11,7 @@ public sealed class BillingServiceApiSkeletonTests : IClassFixture<WebApplicatio
         _factory = factory;
     }
 
-    [Fact(Skip = "Integration skeleton only. Configure test container dependencies before enabling.")]
+    [Fact]
     public async Task HealthEndpoint_ShouldReturnSuccess_WhenApplicationIsRunning()
     {
         var client = _factory.CreateClient();

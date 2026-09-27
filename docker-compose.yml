@@ -13,7 +13,7 @@ services:
         condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Database: Host=postgres;Port=5432;Database=car_repair_billing;Username=postgres;******
+      ConnectionStrings__Database: Host=postgres;Port=5432;Database=car_repair_billing;Username=postgres
       RabbitMq__HostName: rabbitmq
       RabbitMq__Port: 5672
       RabbitMq__UserName: guest
@@ -28,7 +28,7 @@ services:
     environment:
       POSTGRES_DB: car_repair_billing
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
       - '5432:5432'
     healthcheck:

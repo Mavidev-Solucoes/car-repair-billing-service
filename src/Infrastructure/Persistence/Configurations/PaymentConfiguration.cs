@@ -24,5 +24,10 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
             .WithOne()
             .HasForeignKey(x => x.PaymentId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne<Budget>()
+            .WithMany()
+            .HasForeignKey(x => x.BudgetId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
