@@ -96,6 +96,16 @@ namespace Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateIndex(
+                name: "IX_budgets_CreatedAtUtc",
+                table: "budgets",
+                column: "CreatedAtUtc");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_budgets_Status_CreatedAtUtc",
+                table: "budgets",
+                columns: new[] { "Status", "CreatedAtUtc" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_budget_items_BudgetId",
                 table: "budget_items",
                 column: "BudgetId");
@@ -106,9 +116,19 @@ namespace Infrastructure.Persistence.Migrations
                 column: "PaymentId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_payments_BudgetId",
+                name: "IX_payment_transactions_PaymentId_CreatedAtUtc",
+                table: "payment_transactions",
+                columns: new[] { "PaymentId", "CreatedAtUtc" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_payments_BudgetId_Status",
                 table: "payments",
-                column: "BudgetId");
+                columns: new[] { "BudgetId", "Status" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_payments_CreatedAtUtc",
+                table: "payments",
+                column: "CreatedAtUtc");
         }
 
         /// <inheritdoc />

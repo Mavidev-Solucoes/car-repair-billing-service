@@ -24,4 +24,18 @@ public sealed class BudgetTests
 
         Assert.Throws<InvalidOperationException>(() => budget.Reject("not valid"));
     }
+
+    [Fact]
+    public void Constructor_ShouldThrow_WhenItemsAreEmpty()
+    {
+        Assert.Throws<ArgumentException>(() => new Budget("Customer", []));
+    }
+
+    [Fact]
+    public void Reject_ShouldThrow_WhenReasonIsBlank()
+    {
+        var budget = new Budget("Customer", [new BudgetItem("Part", 100m, 1)]);
+
+        Assert.Throws<ArgumentException>(() => budget.Reject("   "));
+    }
 }
