@@ -9,16 +9,11 @@ namespace Infrastructure.Persistence;
 
 public sealed class ApplicationDbContext : DbContext, IUnitOfWork
 {
-    private readonly IDomainEventDispatcher? _domainEventDispatcher;
-
-    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
-        : this(options, null)
-    {
-    }
+    private readonly IDomainEventDispatcher _domainEventDispatcher;
 
     public ApplicationDbContext(
         DbContextOptions<ApplicationDbContext> options,
-        IDomainEventDispatcher? domainEventDispatcher)
+        IDomainEventDispatcher domainEventDispatcher)
         : base(options)
     {
         _domainEventDispatcher = domainEventDispatcher;
@@ -49,24 +44,21 @@ public sealed class ApplicationDbContext : DbContext, IUnitOfWork
             .SelectMany(entity => entity.DomainEvents)
             .ToList();
 
-        var changes = await base.SaveChangesAsync(cancellationToken);
+        var executionStrategy = Database.CreateExecutionStrategy();
+        var changes = await executionStrategy.ExecuteAsync(
+            async () => await base.SaveChangesAsync(cancellationToken));
 
-        if (_domainEventDispatcher is null || domainEvents.Count == 0)
+        if (domainEvents.Count == 0)
         {
-            foreach (var domainEntity in domainEntities)
-            {
-                domainEntity.ClearDomainEvents();
-            }
-
             return changes;
         }
+
+        await _domainEventDispatcher.DispatchAsync(domainEvents, cancellationToken);
 
         foreach (var domainEntity in domainEntities)
         {
             domainEntity.ClearDomainEvents();
         }
-
-        await _domainEventDispatcher.DispatchAsync(domainEvents, cancellationToken);
 
         return changes;
     }

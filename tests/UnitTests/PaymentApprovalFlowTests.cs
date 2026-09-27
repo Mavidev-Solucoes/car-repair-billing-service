@@ -88,6 +88,18 @@ public sealed class PaymentApprovalFlowTests
             publisher.RoutingKeys);
     }
 
+    [Fact]
+    public async Task DomainEventDispatcher_ShouldThrow_WhenDomainEventTypeIsUnknown()
+    {
+        var publisher = new RecordingEventPublisher();
+        var dispatcher = new DomainEventDispatcher(publisher);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            dispatcher.DispatchAsync([new UnknownDomainEvent()], CancellationToken.None));
+
+        Assert.Contains("Unsupported domain event type", exception.Message);
+    }
+
     private sealed class InMemoryBudgetRepository : IBudgetRepository
     {
         private readonly Budget _budget;
@@ -175,5 +187,10 @@ public sealed class PaymentApprovalFlowTests
             RoutingKeys.Add(routingKey);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed record UnknownDomainEvent : IDomainEvent
+    {
+        public DateTime OccurredOnUtc { get; } = DateTime.UtcNow;
     }
 }
