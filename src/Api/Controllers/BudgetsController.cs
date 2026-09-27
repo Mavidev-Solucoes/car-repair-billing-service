@@ -1,5 +1,6 @@
 using Api.Contracts;
 using Application.Budgets.Commands;
+using Application.Budgets.Queries;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 
@@ -7,6 +8,7 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("api/budgets")]
+[Route("budgets")]
 public sealed class BudgetsController : ControllerBase
 {
     private readonly ISender _sender;
@@ -26,6 +28,20 @@ public sealed class BudgetsController : ControllerBase
             cancellationToken);
 
         return Created($"/api/budgets/{budgetId}", new { id = budgetId });
+    }
+
+    [HttpGet("{budgetId:guid}")]
+    public async Task<ActionResult<BudgetResponse>> GetById([FromRoute] Guid budgetId, CancellationToken cancellationToken)
+    {
+        var budget = await _sender.Send(new GetBudgetQuery(budgetId), cancellationToken);
+        return Ok(budget);
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<IReadOnlyCollection<BudgetSummaryResponse>>> List(CancellationToken cancellationToken)
+    {
+        var budgets = await _sender.Send(new ListBudgetsQuery(), cancellationToken);
+        return Ok(budgets);
     }
 
     [HttpPost("{budgetId:guid}/approve")]
