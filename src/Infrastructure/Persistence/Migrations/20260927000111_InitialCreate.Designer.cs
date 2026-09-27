@@ -53,6 +53,10 @@ namespace Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CreatedAtUtc");
+
+                    b.HasIndex("Status", "CreatedAtUtc");
+
                     b.ToTable("budgets", (string)null);
                 });
 
@@ -111,7 +115,9 @@ namespace Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("BudgetId");
+                    b.HasIndex("BudgetId", "Status");
+
+                    b.HasIndex("CreatedAtUtc");
 
                     b.ToTable("payments", (string)null);
                 });
@@ -143,6 +149,8 @@ namespace Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("PaymentId");
+
+                    b.HasIndex("PaymentId", "CreatedAtUtc");
 
                     b.ToTable("payment_transactions", (string)null);
                 });

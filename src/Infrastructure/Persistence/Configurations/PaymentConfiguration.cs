@@ -19,6 +19,8 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.ApprovedAtUtc);
         builder.Property(x => x.RejectedAtUtc);
+        builder.HasIndex(x => x.CreatedAtUtc);
+        builder.HasIndex(x => new { x.BudgetId, x.Status });
 
         builder.HasMany(x => x.Transactions)
             .WithOne()

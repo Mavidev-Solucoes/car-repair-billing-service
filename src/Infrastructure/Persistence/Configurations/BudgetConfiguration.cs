@@ -18,6 +18,8 @@ public sealed class BudgetConfiguration : IEntityTypeConfiguration<Budget>
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.ApprovedAtUtc);
         builder.Property(x => x.RejectedAtUtc);
+        builder.HasIndex(x => x.CreatedAtUtc);
+        builder.HasIndex(x => new { x.Status, x.CreatedAtUtc });
 
         builder.HasMany(x => x.Items)
             .WithOne()

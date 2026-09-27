@@ -8,8 +8,23 @@ public sealed class BudgetItem
 
     public BudgetItem(string description, decimal unitPrice, int quantity)
     {
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            throw new ArgumentException("Description is required.", nameof(description));
+        }
+
+        if (unitPrice <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(unitPrice), "Unit price must be greater than zero.");
+        }
+
+        if (quantity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(quantity), "Quantity must be greater than zero.");
+        }
+
         Id = Guid.NewGuid();
-        Description = description;
+        Description = description.Trim();
         UnitPrice = unitPrice;
         Quantity = quantity;
     }

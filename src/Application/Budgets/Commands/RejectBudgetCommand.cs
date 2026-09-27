@@ -10,6 +10,7 @@ public sealed class RejectBudgetCommandValidator : AbstractValidator<RejectBudge
 {
     public RejectBudgetCommandValidator()
     {
+        RuleFor(x => x.BudgetId).NotEmpty();
         RuleFor(x => x.Reason).NotEmpty().MaximumLength(500);
     }
 }
