@@ -69,7 +69,7 @@ jobs:
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url="https://sonarcloud.io" \
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
-            /s:"$GITHUB_WORKSPACE/sonar-project.properties"
+            /d:sonar.coverage.exclusions="**/Migrations/**,**/Program.cs"
 
       - name: 2. Build
         run: dotnet build ${{ github.workspace }}/CarRepairBillingService.sln --configuration Release --no-restore
