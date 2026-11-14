@@ -34,10 +34,19 @@ public sealed class PaymentRepository : IPaymentRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyCollection<Payment>> ListByBudgetIdAsync(Guid budgetId, CancellationToken cancellationToken)
+    {
+        return await _context.Payments
+            .Include(x => x.Transactions)
+            .Where(x => x.BudgetId == budgetId)
+            .OrderBy(x => x.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+    }
+
     public Task<decimal> GetReservedAmountByBudgetIdAsync(Guid budgetId, CancellationToken cancellationToken)
     {
         return _context.Payments
-            .Where(x => x.BudgetId == budgetId && x.Status != PaymentStatus.Rejected)
+            .Where(x => x.BudgetId == budgetId && x.Status != PaymentStatus.Rejected && x.Status != PaymentStatus.Refunded)
             .SumAsync(x => x.Amount, cancellationToken);
     }
 }

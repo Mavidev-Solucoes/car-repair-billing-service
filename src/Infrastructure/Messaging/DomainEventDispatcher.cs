@@ -1,11 +1,18 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Application.Abstractions.Messaging;
 using Domain.Common;
-using Domain.Events;
 
 namespace Infrastructure.Messaging;
 
+/// <summary>
+/// Publica os eventos de domínio no envelope do contrato: tipo = nome da classe sem "DomainEvent",
+/// correlationId = id da OS.
+/// </summary>
 public sealed class DomainEventDispatcher : IDomainEventDispatcher
 {
+    private const string DomainEventSuffix = "DomainEvent";
+
     private readonly IEventPublisher _eventPublisher;
 
     public DomainEventDispatcher(IEventPublisher eventPublisher)
@@ -17,44 +24,28 @@ public sealed class DomainEventDispatcher : IDomainEventDispatcher
     {
         foreach (var domainEvent in domainEvents)
         {
-            switch (domainEvent)
-            {
-                case BudgetCreatedDomainEvent budgetCreated:
-                    await PublishAsync(budgetCreated, "budgets.created", cancellationToken);
-                    break;
-                case BudgetApprovedDomainEvent budgetApproved:
-                    await PublishAsync(budgetApproved, "budgets.approved", cancellationToken);
-                    break;
-                case BudgetRejectedDomainEvent budgetRejected:
-                    await PublishAsync(budgetRejected, "budgets.rejected", cancellationToken);
-                    break;
-                case PaymentCreatedDomainEvent paymentCreated:
-                    await PublishAsync(paymentCreated, "payments.created", cancellationToken);
-                    break;
-                case PaymentApprovedDomainEvent paymentApproved:
-                    await PublishAsync(paymentApproved, "payments.approved", cancellationToken);
-                    break;
-                case PaymentRejectedDomainEvent paymentRejected:
-                    await PublishAsync(paymentRejected, "payments.rejected", cancellationToken);
-                    break;
-                default:
-                    throw new InvalidOperationException($"Unsupported domain event type '{domainEvent.GetType().FullName}'.");
-            }
+            await _eventPublisher.PublishAsync(ToIntegrationMessage(domainEvent), cancellationToken);
         }
     }
 
-    private Task PublishAsync<TDomainEvent>(TDomainEvent domainEvent, string routingKey, CancellationToken cancellationToken)
-        where TDomainEvent : class, IDomainEvent
+    public static IntegrationMessage ToIntegrationMessage(IDomainEvent domainEvent)
     {
-        var envelope = new MessageEnvelope<TDomainEvent>(
-            MessageId: Guid.NewGuid(),
-            CorrelationId: Guid.NewGuid(),
-            SagaId: null,
-            EventType: typeof(TDomainEvent).Name,
-            EventVersion: 1,
-            OccurredAt: domainEvent.OccurredOnUtc,
-            Payload: domainEvent);
+        if (domainEvent is not IServiceOrderEvent serviceOrderEvent)
+        {
+            throw new InvalidOperationException(
+                $"Domain event '{domainEvent.GetType().FullName}' is not linked to a service order.");
+        }
 
-        return _eventPublisher.PublishAsync(envelope, routingKey, cancellationToken);
+        var payload = JsonSerializer.SerializeToNode(domainEvent, domainEvent.GetType(), IntegrationMessage.SerializerOptions) as JsonObject ?? [];
+        payload.Remove("occurredOnUtc");
+
+        var name = domainEvent.GetType().Name;
+        return new IntegrationMessage
+        {
+            Type = name.EndsWith(DomainEventSuffix, StringComparison.Ordinal) ? name[..^DomainEventSuffix.Length] : name,
+            CorrelationId = serviceOrderEvent.ServiceOrderId.ToString("D"),
+            OccurredAtUtc = domainEvent.OccurredOnUtc,
+            Payload = payload
+        };
     }
 }

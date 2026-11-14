@@ -23,6 +23,7 @@ public sealed class BudgetsController : ControllerBase
     {
         var budgetId = await _sender.Send(
             new CreateBudgetCommand(
+                request.ServiceOrderId,
                 request.CustomerName,
                 request.Items.Select(x => new CreateBudgetItemModel(x.Description, x.UnitPrice, x.Quantity)).ToList()),
             cancellationToken);
@@ -45,9 +46,12 @@ public sealed class BudgetsController : ControllerBase
     }
 
     [HttpPost("{budgetId:guid}/approve")]
-    public async Task<IActionResult> Approve([FromRoute] Guid budgetId, CancellationToken cancellationToken)
+    public async Task<IActionResult> Approve(
+        [FromRoute] Guid budgetId,
+        [FromBody] ApproveBudgetRequest? request,
+        CancellationToken cancellationToken)
     {
-        await _sender.Send(new ApproveBudgetCommand(budgetId), cancellationToken);
+        await _sender.Send(new ApproveBudgetCommand(budgetId, request?.SimulatePaymentFailure ?? false), cancellationToken);
         return NoContent();
     }
 

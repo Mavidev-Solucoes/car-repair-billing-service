@@ -12,6 +12,9 @@ public sealed class BudgetConfiguration : IEntityTypeConfiguration<Budget>
 
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.Property(x => x.ServiceOrderId).IsRequired();
+        builder.HasIndex(x => x.ServiceOrderId).IsUnique();
+        builder.Property(x => x.CancelledAtUtc);
         builder.Property(x => x.CustomerName).HasMaxLength(200).IsRequired();
         builder.Property(x => x.Status).IsRequired();
         builder.Property(x => x.RejectionReason).HasMaxLength(500);

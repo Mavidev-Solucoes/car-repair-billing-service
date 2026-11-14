@@ -29,6 +29,7 @@ public static class DependencyInjection
         services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
         services.AddSingleton<ICommandConsumer, RabbitMqCommandConsumer>();
         services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
+        services.AddHostedService<SagaCommandsWorker>();
 
         return services;
     }

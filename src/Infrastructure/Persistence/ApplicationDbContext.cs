@@ -44,9 +44,12 @@ public sealed class ApplicationDbContext : DbContext, IUnitOfWork
             .SelectMany(entity => entity.DomainEvents)
             .ToList();
 
-        var executionStrategy = Database.CreateExecutionStrategy();
-        var changes = await executionStrategy.ExecuteAsync(
-            async () => await base.SaveChangesAsync(cancellationToken));
+        // Dentro de ExecuteInTransactionAsync a estratégia de retry já envolve a transação inteira;
+        // abrir outra aqui faz o Npgsql recusar a transação iniciada pelo usuário.
+        var changes = Database.CurrentTransaction is not null
+            ? await base.SaveChangesAsync(cancellationToken)
+            : await Database.CreateExecutionStrategy().ExecuteAsync(
+                async () => await base.SaveChangesAsync(cancellationToken));
 
         if (domainEvents.Count == 0)
         {
@@ -68,8 +71,12 @@ public sealed class ApplicationDbContext : DbContext, IUnitOfWork
         IsolationLevel isolationLevel,
         CancellationToken cancellationToken)
     {
-        await using var transaction = await Database.BeginTransactionAsync(isolationLevel, cancellationToken);
-        await action(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        var executionStrategy = Database.CreateExecutionStrategy();
+        await executionStrategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await Database.BeginTransactionAsync(isolationLevel, cancellationToken);
+            await action(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
     }
 }

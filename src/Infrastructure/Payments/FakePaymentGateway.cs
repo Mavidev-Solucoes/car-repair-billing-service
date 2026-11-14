@@ -21,6 +21,18 @@ public sealed class FakePaymentGateway : IPaymentGateway
         return Task.FromResult(new PaymentGatewayResult(
             true,
             $"fake-success-{paymentId:N}",
-            $"Simulated successful payment of {amount:0.00}."));
+            FormattableString.Invariant($"Simulated successful payment of {amount:0.00}.")));
+    }
+
+    public Task<PaymentGatewayResult> RefundAsync(
+        Guid paymentId,
+        string externalReference,
+        decimal amount,
+        CancellationToken cancellationToken)
+    {
+        return Task.FromResult(new PaymentGatewayResult(
+            true,
+            $"fake-refund-{paymentId:N}",
+            FormattableString.Invariant($"Simulated refund of {amount:0.00} for {externalReference}.")));
     }
 }

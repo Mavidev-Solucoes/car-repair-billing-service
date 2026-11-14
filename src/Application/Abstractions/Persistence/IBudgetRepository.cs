@@ -8,5 +8,7 @@ public interface IBudgetRepository
 
     Task<Budget?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
 
+    Task<Budget?> GetByServiceOrderIdAsync(Guid serviceOrderId, CancellationToken cancellationToken);
+
     Task<IReadOnlyCollection<Budget>> ListAsync(CancellationToken cancellationToken);
 }
