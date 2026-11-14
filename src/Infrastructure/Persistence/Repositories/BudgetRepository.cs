@@ -25,6 +25,13 @@ public sealed class BudgetRepository : IBudgetRepository
             .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
     }
 
+    public Task<Budget?> GetByServiceOrderIdAsync(Guid serviceOrderId, CancellationToken cancellationToken)
+    {
+        return _context.Budgets
+            .Include(x => x.Items)
+            .SingleOrDefaultAsync(x => x.ServiceOrderId == serviceOrderId, cancellationToken);
+    }
+
     public async Task<IReadOnlyCollection<Budget>> ListAsync(CancellationToken cancellationToken)
     {
         return await _context.Budgets

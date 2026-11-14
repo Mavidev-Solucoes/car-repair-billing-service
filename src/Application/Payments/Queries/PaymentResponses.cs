@@ -5,12 +5,14 @@ namespace Application.Payments.Queries;
 public sealed record PaymentResponse(
     Guid Id,
     Guid BudgetId,
+    Guid ServiceOrderId,
     decimal Amount,
     PaymentStatus Status,
     DateTime CreatedAtUtc,
     DateTime? ApprovedAtUtc,
     DateTime? RejectedAtUtc,
     string? RejectionReason,
+    DateTime? RefundedAtUtc,
     IReadOnlyCollection<PaymentTransactionResponse> Transactions);
 
 public sealed record PaymentTransactionResponse(
@@ -23,6 +25,7 @@ public sealed record PaymentTransactionResponse(
 public sealed record PaymentSummaryResponse(
     Guid Id,
     Guid BudgetId,
+    Guid ServiceOrderId,
     decimal Amount,
     PaymentStatus Status,
     DateTime CreatedAtUtc);

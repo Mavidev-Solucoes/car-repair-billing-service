@@ -4,6 +4,7 @@ namespace Application.Budgets.Queries;
 
 public sealed record BudgetResponse(
     Guid Id,
+    Guid ServiceOrderId,
     string CustomerName,
     BudgetStatus Status,
     decimal TotalAmount,
@@ -11,6 +12,7 @@ public sealed record BudgetResponse(
     DateTime? ApprovedAtUtc,
     DateTime? RejectedAtUtc,
     string? RejectionReason,
+    DateTime? CancelledAtUtc,
     IReadOnlyCollection<BudgetItemResponse> Items);
 
 public sealed record BudgetItemResponse(
@@ -22,6 +24,7 @@ public sealed record BudgetItemResponse(
 
 public sealed record BudgetSummaryResponse(
     Guid Id,
+    Guid ServiceOrderId,
     string CustomerName,
     BudgetStatus Status,
     decimal TotalAmount,

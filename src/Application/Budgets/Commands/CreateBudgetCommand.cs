@@ -5,7 +5,10 @@ using Domain.Entities;
 
 namespace Application.Budgets.Commands;
 
-public sealed record CreateBudgetCommand(string CustomerName, IReadOnlyCollection<CreateBudgetItemModel> Items) : IRequest<Guid>;
+public sealed record CreateBudgetCommand(
+    Guid ServiceOrderId,
+    string CustomerName,
+    IReadOnlyCollection<CreateBudgetItemModel> Items) : IRequest<Guid>;
 
 public sealed record CreateBudgetItemModel(string Description, decimal UnitPrice, int Quantity);
 
@@ -13,6 +16,7 @@ public sealed class CreateBudgetCommandValidator : AbstractValidator<CreateBudge
 {
     public CreateBudgetCommandValidator()
     {
+        RuleFor(x => x.ServiceOrderId).NotEmpty();
         RuleFor(x => x.CustomerName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Items).NotEmpty();
         RuleForEach(x => x.Items).SetValidator(new CreateBudgetItemModelValidator());
@@ -42,7 +46,15 @@ public sealed class CreateBudgetCommandHandler : IRequestHandler<CreateBudgetCom
 
     public async Task<Guid> Handle(CreateBudgetCommand request, CancellationToken cancellationToken)
     {
+        // Idempotência: a saga pode reenviar o comando; uma OS tem um orçamento só.
+        var existing = await _budgetRepository.GetByServiceOrderIdAsync(request.ServiceOrderId, cancellationToken);
+        if (existing is not null)
+        {
+            return existing.Id;
+        }
+
         var budget = new Budget(
+            request.ServiceOrderId,
             request.CustomerName,
             request.Items.Select(item => new BudgetItem(item.Description, item.UnitPrice, item.Quantity)));
 

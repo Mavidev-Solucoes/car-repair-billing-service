@@ -13,6 +13,9 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.BudgetId).IsRequired();
+        builder.Property(x => x.ServiceOrderId).IsRequired();
+        builder.HasIndex(x => x.ServiceOrderId);
+        builder.Property(x => x.RefundedAtUtc);
         builder.Property(x => x.Amount).HasColumnType("numeric(18,2)").IsRequired();
         builder.Property(x => x.Status).IsRequired();
         builder.Property(x => x.RejectionReason).HasMaxLength(500);

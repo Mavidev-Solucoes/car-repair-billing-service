@@ -1,6 +1,4 @@
-using Application.Abstractions.Messaging;
 using Application.Abstractions.Payments;
-using Application.Abstractions.Persistence;
 using Application.Payments.Commands;
 using Domain.Common;
 using Domain.Entities;
@@ -12,10 +10,12 @@ namespace UnitTests;
 
 public sealed class PaymentApprovalFlowTests
 {
+    private static readonly Guid ServiceOrderId = Guid.NewGuid();
+
     [Fact]
     public async Task ApprovePayment_ShouldApproveAndStoreSuccessfulTransaction()
     {
-        var payment = new Payment(Guid.NewGuid(), 120m);
+        var payment = new Payment(Guid.NewGuid(), ServiceOrderId, 120m);
         var repository = new InMemoryPaymentRepository(payment);
         var gateway = new StubPaymentGateway(new PaymentGatewayResult(true, "gateway-ref", "approved"));
         var unitOfWork = new NoOpUnitOfWork();
@@ -34,7 +34,7 @@ public sealed class PaymentApprovalFlowTests
     [Fact]
     public async Task ApprovePayment_ShouldRejectAndStoreFailedTransaction_WhenGatewayFails()
     {
-        var payment = new Payment(Guid.NewGuid(), 120m);
+        var payment = new Payment(Guid.NewGuid(), ServiceOrderId, 120m);
         var repository = new InMemoryPaymentRepository(payment);
         var gateway = new StubPaymentGateway(new PaymentGatewayResult(false, "gateway-ref", "gateway failure"));
         var unitOfWork = new NoOpUnitOfWork();
@@ -52,11 +52,10 @@ public sealed class PaymentApprovalFlowTests
     [Fact]
     public async Task CreatePayment_ShouldThrow_WhenRequestedAmountExceedsRemainingBudgetBalance()
     {
-        var budget = new Budget("Customer", [new BudgetItem("Part", 150m, 1)]);
-        budget.Approve();
+        var budget = Builders.ApprovedBudget(ServiceOrderId);
 
         var budgetRepository = new InMemoryBudgetRepository(budget);
-        var paymentRepository = new InMemoryPaymentRepository(new Payment(budget.Id, 100m));
+        var paymentRepository = new InMemoryPaymentRepository(new Payment(budget.Id, ServiceOrderId, 100m));
         var unitOfWork = new NoOpUnitOfWork();
         var handler = new CreatePaymentCommandHandler(budgetRepository, paymentRepository, unitOfWork);
 
@@ -67,126 +66,59 @@ public sealed class PaymentApprovalFlowTests
     }
 
     [Fact]
-    public async Task DomainEventDispatcher_ShouldPublishKnownDomainEventsWithExpectedRoutingKeys()
+    public async Task CreatePayment_ShouldCopyServiceOrderFromBudget()
+    {
+        var budget = Builders.ApprovedBudget(ServiceOrderId);
+        var paymentRepository = new InMemoryPaymentRepository();
+        var handler = new CreatePaymentCommandHandler(new InMemoryBudgetRepository(budget), paymentRepository, new NoOpUnitOfWork());
+
+        await handler.Handle(new CreatePaymentCommand(budget.Id, 50m), CancellationToken.None);
+
+        Assert.Equal(ServiceOrderId, Assert.Single(paymentRepository.Items).ServiceOrderId);
+    }
+
+    [Fact]
+    public async Task DomainEventDispatcher_ShouldPublishEventsFollowingTheContract()
     {
         var publisher = new RecordingEventPublisher();
         var dispatcher = new DomainEventDispatcher(publisher);
+        var budgetId = Guid.NewGuid();
+        var paymentId = Guid.NewGuid();
         var events = new IDomainEvent[]
         {
-            new BudgetCreatedDomainEvent(Guid.NewGuid()),
-            new BudgetApprovedDomainEvent(Guid.NewGuid()),
-            new BudgetRejectedDomainEvent(Guid.NewGuid(), "reason"),
-            new PaymentCreatedDomainEvent(Guid.NewGuid(), Guid.NewGuid()),
-            new PaymentApprovedDomainEvent(Guid.NewGuid()),
-            new PaymentRejectedDomainEvent(Guid.NewGuid(), "reason")
+            new BudgetCreatedDomainEvent(budgetId, ServiceOrderId, 150m),
+            new BudgetApprovedDomainEvent(budgetId, ServiceOrderId, 150m, false),
+            new BudgetRejectedDomainEvent(budgetId, ServiceOrderId, "reason"),
+            new BudgetCancelledDomainEvent(budgetId, ServiceOrderId, [paymentId]),
+            new PaymentCreatedDomainEvent(paymentId, budgetId, ServiceOrderId),
+            new PaymentApprovedDomainEvent(paymentId, budgetId, ServiceOrderId, 150m),
+            new PaymentRejectedDomainEvent(paymentId, budgetId, ServiceOrderId, "reason"),
+            new PaymentRefundedDomainEvent(paymentId, budgetId, ServiceOrderId, 150m)
         };
 
         await dispatcher.DispatchAsync(events, CancellationToken.None);
 
         Assert.Equal(
-            ["budgets.created", "budgets.approved", "budgets.rejected", "payments.created", "payments.approved", "payments.rejected"],
-            publisher.RoutingKeys);
+            ["BudgetCreated", "BudgetApproved", "BudgetRejected", "BudgetCancelled", "PaymentCreated", "PaymentApproved", "PaymentRejected", "PaymentRefunded"],
+            publisher.Messages.Select(message => message.Type).ToArray());
+        Assert.All(publisher.Messages, message => Assert.Equal(ServiceOrderId.ToString("D"), message.CorrelationId));
+
+        var approved = publisher.Messages[5];
+        Assert.Equal(paymentId, approved.GetGuid("paymentId"));
+        Assert.Equal(budgetId, approved.GetGuid("budgetId"));
+        Assert.Equal(150m, approved.Payload!["amount"]!.GetValue<decimal>());
+        Assert.False(approved.Payload.ContainsKey("occurredOnUtc"));
     }
 
     [Fact]
-    public async Task DomainEventDispatcher_ShouldThrow_WhenDomainEventTypeIsUnknown()
+    public async Task DomainEventDispatcher_ShouldThrow_WhenEventIsNotLinkedToServiceOrder()
     {
-        var publisher = new RecordingEventPublisher();
-        var dispatcher = new DomainEventDispatcher(publisher);
+        var dispatcher = new DomainEventDispatcher(new RecordingEventPublisher());
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             dispatcher.DispatchAsync([new UnknownDomainEvent()], CancellationToken.None));
 
-        Assert.Contains("Unsupported domain event type", exception.Message);
-    }
-
-    private sealed class InMemoryBudgetRepository : IBudgetRepository
-    {
-        private readonly Budget _budget;
-
-        public InMemoryBudgetRepository(Budget budget)
-        {
-            _budget = budget;
-        }
-
-        public Task AddAsync(Budget budget, CancellationToken cancellationToken) => Task.CompletedTask;
-
-        public Task<Budget?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
-            => Task.FromResult(id == _budget.Id ? _budget : null);
-
-        public Task<IReadOnlyCollection<Budget>> ListAsync(CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyCollection<Budget>>([_budget]);
-    }
-
-    private sealed class InMemoryPaymentRepository : IPaymentRepository
-    {
-        private readonly Dictionary<Guid, Payment> _payments;
-
-        public InMemoryPaymentRepository(params Payment[] payments)
-        {
-            _payments = payments.ToDictionary(x => x.Id);
-        }
-
-        public Task AddAsync(Payment payment, CancellationToken cancellationToken)
-        {
-            _payments[payment.Id] = payment;
-            return Task.CompletedTask;
-        }
-
-        public Task<Payment?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
-            => Task.FromResult(_payments.TryGetValue(id, out var payment) ? payment : null);
-
-        public Task<IReadOnlyCollection<Payment>> ListAsync(CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyCollection<Payment>>(_payments.Values.ToList());
-
-        public Task<decimal> GetReservedAmountByBudgetIdAsync(Guid budgetId, CancellationToken cancellationToken)
-            => Task.FromResult(_payments.Values.Where(x => x.BudgetId == budgetId && x.Status != PaymentStatus.Rejected).Sum(x => x.Amount));
-    }
-
-    private sealed class NoOpUnitOfWork : IUnitOfWork
-    {
-        public int SaveChangesCalls { get; private set; }
-
-        public Task<int> SaveChangesAsync(CancellationToken cancellationToken)
-        {
-            SaveChangesCalls++;
-            return Task.FromResult(1);
-        }
-
-        public Task ExecuteInTransactionAsync(
-            Func<CancellationToken, Task> action,
-            System.Data.IsolationLevel isolationLevel,
-            CancellationToken cancellationToken)
-            => action(cancellationToken);
-    }
-
-    private sealed class StubPaymentGateway : IPaymentGateway
-    {
-        private readonly PaymentGatewayResult _result;
-
-        public StubPaymentGateway(PaymentGatewayResult result)
-        {
-            _result = result;
-        }
-
-        public Task<PaymentGatewayResult> ProcessAsync(
-            Guid paymentId,
-            decimal amount,
-            bool simulateFailure,
-            CancellationToken cancellationToken)
-            => Task.FromResult(_result);
-    }
-
-    private sealed class RecordingEventPublisher : IEventPublisher
-    {
-        public List<string> RoutingKeys { get; } = [];
-
-        public Task PublishAsync<TEvent>(MessageEnvelope<TEvent> envelope, string routingKey, CancellationToken cancellationToken = default)
-            where TEvent : class
-        {
-            RoutingKeys.Add(routingKey);
-            return Task.CompletedTask;
-        }
+        Assert.Contains("not linked to a service order", exception.Message);
     }
 
     private sealed record UnknownDomainEvent : IDomainEvent

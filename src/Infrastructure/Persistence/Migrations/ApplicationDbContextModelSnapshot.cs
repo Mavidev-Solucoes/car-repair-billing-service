@@ -30,6 +30,9 @@ namespace Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("ApprovedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -45,12 +48,18 @@ namespace Infrastructure.Persistence.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<Guid>("ServiceOrderId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAtUtc");
+
+                    b.HasIndex("ServiceOrderId")
+                        .IsUnique();
 
                     b.HasIndex("Status", "CreatedAtUtc");
 
@@ -100,6 +109,9 @@ namespace Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("RefundedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("RejectedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -107,14 +119,19 @@ namespace Infrastructure.Persistence.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<Guid>("ServiceOrderId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("BudgetId", "Status");
-
                     b.HasIndex("CreatedAtUtc");
+
+                    b.HasIndex("ServiceOrderId");
+
+                    b.HasIndex("BudgetId", "Status");
 
                     b.ToTable("payments", (string)null);
                 });
@@ -144,8 +161,6 @@ namespace Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("PaymentId");
 
                     b.HasIndex("PaymentId", "CreatedAtUtc");
 

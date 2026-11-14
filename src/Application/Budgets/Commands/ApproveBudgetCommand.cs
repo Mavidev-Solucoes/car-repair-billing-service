@@ -4,7 +4,8 @@ using MediatR;
 
 namespace Application.Budgets.Commands;
 
-public sealed record ApproveBudgetCommand(Guid BudgetId) : IRequest;
+/// <param name="SimulatePaymentFailure">Vai no evento BudgetApproved e faz o gateway recusar o pagamento (demonstração da compensação).</param>
+public sealed record ApproveBudgetCommand(Guid BudgetId, bool SimulatePaymentFailure = false) : IRequest;
 
 public sealed class ApproveBudgetCommandValidator : AbstractValidator<ApproveBudgetCommand>
 {
@@ -30,7 +31,7 @@ public sealed class ApproveBudgetCommandHandler : IRequestHandler<ApproveBudgetC
         var budget = await _budgetRepository.GetByIdAsync(request.BudgetId, cancellationToken)
             ?? throw new KeyNotFoundException($"Budget '{request.BudgetId}' was not found.");
 
-        budget.Approve();
+        budget.Approve(request.SimulatePaymentFailure);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 }

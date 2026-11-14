@@ -56,7 +56,7 @@ public sealed class CreatePaymentCommandHandler : IRequestHandler<CreatePaymentC
                 throw new InvalidOperationException("Payment amount cannot exceed the remaining budget balance.");
             }
 
-            var payment = new Payment(request.BudgetId, request.Amount);
+            var payment = new Payment(request.BudgetId, budget.ServiceOrderId, request.Amount);
             await _paymentRepository.AddAsync(payment, ct);
             await _unitOfWork.SaveChangesAsync(ct);
             paymentId = payment.Id;

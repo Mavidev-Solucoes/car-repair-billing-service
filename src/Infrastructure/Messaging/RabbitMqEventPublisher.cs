@@ -13,7 +13,6 @@ public sealed class RabbitMqEventPublisher : IEventPublisher, IDisposable, IAsyn
     private readonly ILogger<RabbitMqEventPublisher> _logger;
     private readonly IConnection _connection;
     private readonly SemaphoreSlim _publishLock = new(1, 1);
-    private readonly JsonSerializerOptions _serializerOptions = new(JsonSerializerDefaults.Web);
 
     public RabbitMqEventPublisher(IOptions<RabbitMqOptions> options, ILogger<RabbitMqEventPublisher> logger)
     {
@@ -36,11 +35,7 @@ public sealed class RabbitMqEventPublisher : IEventPublisher, IDisposable, IAsyn
         bootstrapChannel.ExchangeDeclare(rabbitMqOptions.ExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
     }
 
-    public async Task PublishAsync<TEvent>(
-        MessageEnvelope<TEvent> envelope,
-        string routingKey,
-        CancellationToken cancellationToken = default)
-        where TEvent : class
+    public async Task PublishAsync(IntegrationMessage message, CancellationToken cancellationToken = default)
     {
         await _publishLock.WaitAsync(cancellationToken);
 
@@ -49,36 +44,26 @@ public sealed class RabbitMqEventPublisher : IEventPublisher, IDisposable, IAsyn
             cancellationToken.ThrowIfCancellationRequested();
 
             using var channel = _connection.CreateModel();
-            var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(envelope, _serializerOptions));
+            var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message, IntegrationMessage.SerializerOptions));
             var properties = channel.CreateBasicProperties();
             properties.Persistent = true;
             properties.ContentType = "application/json";
-            properties.MessageId = envelope.MessageId.ToString();
-            properties.CorrelationId = envelope.CorrelationId.ToString();
-            properties.Type = envelope.EventType;
-            properties.Timestamp = new AmqpTimestamp(envelope.OccurredAt.ToUnixTimeSeconds());
-            properties.Headers = new Dictionary<string, object>
-            {
-                ["event-version"] = envelope.EventVersion,
-                ["occurred-at"] = envelope.OccurredAt.ToString("O")
-            };
-
-            if (envelope.SagaId.HasValue)
-            {
-                properties.Headers["saga-id"] = envelope.SagaId.Value.ToString();
-            }
+            properties.MessageId = message.MessageId.ToString();
+            properties.CorrelationId = message.CorrelationId;
+            properties.Type = message.Type;
+            properties.Timestamp = new AmqpTimestamp(new DateTimeOffset(DateTime.SpecifyKind(message.OccurredAtUtc, DateTimeKind.Utc)).ToUnixTimeSeconds());
 
             channel.BasicPublish(
                 exchange: _exchangeName,
-                routingKey: routingKey,
+                routingKey: message.Type,
                 basicProperties: properties,
                 body: body);
 
             _logger.LogInformation(
                 "Published event {EventType} with MessageId {MessageId} to routing key {RoutingKey}.",
-                envelope.EventType,
-                envelope.MessageId,
-                routingKey);
+                message.Type,
+                message.MessageId,
+                message.Type);
 
             return;
         }

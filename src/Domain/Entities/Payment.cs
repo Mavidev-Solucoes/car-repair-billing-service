@@ -12,8 +12,13 @@ public sealed class Payment : Entity
     {
     }
 
-    public Payment(Guid budgetId, decimal amount)
+    public Payment(Guid budgetId, Guid serviceOrderId, decimal amount)
     {
+        if (serviceOrderId == Guid.Empty)
+        {
+            throw new ArgumentException("Service order identifier is required.", nameof(serviceOrderId));
+        }
+
         if (budgetId == Guid.Empty)
         {
             throw new ArgumentException("Budget identifier is required.", nameof(budgetId));
@@ -26,14 +31,17 @@ public sealed class Payment : Entity
 
         Id = Guid.NewGuid();
         BudgetId = budgetId;
+        ServiceOrderId = serviceOrderId;
         Amount = amount;
         Status = PaymentStatus.Pending;
-        RaiseDomainEvent(new PaymentCreatedDomainEvent(Id, budgetId));
+        RaiseDomainEvent(new PaymentCreatedDomainEvent(Id, budgetId, serviceOrderId));
     }
 
     public Guid Id { get; private set; }
 
     public Guid BudgetId { get; private set; }
+
+    public Guid ServiceOrderId { get; private set; }
 
     public decimal Amount { get; private set; }
 
@@ -46,6 +54,8 @@ public sealed class Payment : Entity
     public DateTime? RejectedAtUtc { get; private set; }
 
     public string? RejectionReason { get; private set; }
+
+    public DateTime? RefundedAtUtc { get; private set; }
 
     public IReadOnlyCollection<PaymentTransaction> Transactions => _transactions.AsReadOnly();
 
@@ -71,7 +81,7 @@ public sealed class Payment : Entity
 
         Status = PaymentStatus.Approved;
         ApprovedAtUtc = DateTime.UtcNow;
-        RaiseDomainEvent(new PaymentApprovedDomainEvent(Id));
+        RaiseDomainEvent(new PaymentApprovedDomainEvent(Id, BudgetId, ServiceOrderId, Amount));
     }
 
     public void Reject(string reason)
@@ -89,6 +99,25 @@ public sealed class Payment : Entity
         Status = PaymentStatus.Rejected;
         RejectionReason = reason.Trim();
         RejectedAtUtc = DateTime.UtcNow;
-        RaiseDomainEvent(new PaymentRejectedDomainEvent(Id, RejectionReason));
+        RaiseDomainEvent(new PaymentRejectedDomainEvent(Id, BudgetId, ServiceOrderId, RejectionReason));
+    }
+
+    /// <summary>
+    /// Compensação da saga: estorna um pagamento aprovado.
+    /// </summary>
+    public void Refund(PaymentTransaction refundTransaction)
+    {
+        ArgumentNullException.ThrowIfNull(refundTransaction);
+
+        if (Status != PaymentStatus.Approved)
+        {
+            throw new InvalidOperationException("Only approved payments can be refunded.");
+        }
+
+        refundTransaction.SetPaymentId(Id);
+        _transactions.Add(refundTransaction);
+        Status = PaymentStatus.Refunded;
+        RefundedAtUtc = DateTime.UtcNow;
+        RaiseDomainEvent(new PaymentRefundedDomainEvent(Id, BudgetId, ServiceOrderId, Amount));
     }
 }

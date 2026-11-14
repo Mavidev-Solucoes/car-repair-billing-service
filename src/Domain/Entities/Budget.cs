@@ -12,8 +12,13 @@ public sealed class Budget : Entity
     {
     }
 
-    public Budget(string customerName, IEnumerable<BudgetItem> items)
+    public Budget(Guid serviceOrderId, string customerName, IEnumerable<BudgetItem> items)
     {
+        if (serviceOrderId == Guid.Empty)
+        {
+            throw new ArgumentException("Service order identifier is required.", nameof(serviceOrderId));
+        }
+
         if (string.IsNullOrWhiteSpace(customerName))
         {
             throw new ArgumentException("Customer name is required.", nameof(customerName));
@@ -27,6 +32,7 @@ public sealed class Budget : Entity
         }
 
         Id = Guid.NewGuid();
+        ServiceOrderId = serviceOrderId;
         CustomerName = customerName.Trim();
         Status = BudgetStatus.Pending;
         foreach (var item in budgetItems)
@@ -34,10 +40,15 @@ public sealed class Budget : Entity
             item.SetBudgetId(Id);
             _items.Add(item);
         }
-        RaiseDomainEvent(new BudgetCreatedDomainEvent(Id));
+        RaiseDomainEvent(new BudgetCreatedDomainEvent(Id, ServiceOrderId, TotalAmount));
     }
 
     public Guid Id { get; private set; }
+
+    /// <summary>
+    /// Id da ordem de serviço no os-service. É o correlationId das mensagens da saga.
+    /// </summary>
+    public Guid ServiceOrderId { get; private set; }
 
     public string CustomerName { get; private set; } = string.Empty;
 
@@ -51,11 +62,13 @@ public sealed class Budget : Entity
 
     public string? RejectionReason { get; private set; }
 
+    public DateTime? CancelledAtUtc { get; private set; }
+
     public IReadOnlyCollection<BudgetItem> Items => _items.AsReadOnly();
 
     public decimal TotalAmount => _items.Sum(x => x.Total);
 
-    public void Approve()
+    public void Approve(bool simulatePaymentFailure = false)
     {
         if (Status != BudgetStatus.Pending)
         {
@@ -64,7 +77,7 @@ public sealed class Budget : Entity
 
         Status = BudgetStatus.Approved;
         ApprovedAtUtc = DateTime.UtcNow;
-        RaiseDomainEvent(new BudgetApprovedDomainEvent(Id));
+        RaiseDomainEvent(new BudgetApprovedDomainEvent(Id, ServiceOrderId, TotalAmount, simulatePaymentFailure));
     }
 
     public void Reject(string reason)
@@ -82,6 +95,23 @@ public sealed class Budget : Entity
         Status = BudgetStatus.Rejected;
         RejectionReason = reason.Trim();
         RejectedAtUtc = DateTime.UtcNow;
-        RaiseDomainEvent(new BudgetRejectedDomainEvent(Id, RejectionReason));
+        RaiseDomainEvent(new BudgetRejectedDomainEvent(Id, ServiceOrderId, RejectionReason));
+    }
+
+    /// <summary>
+    /// Compensação da saga: cancela um orçamento pendente ou aprovado.
+    /// </summary>
+    public void Cancel(IReadOnlyCollection<Guid> refundedPaymentIds)
+    {
+        ArgumentNullException.ThrowIfNull(refundedPaymentIds);
+
+        if (Status is not (BudgetStatus.Pending or BudgetStatus.Approved))
+        {
+            throw new InvalidOperationException("Only pending or approved budgets can be cancelled.");
+        }
+
+        Status = BudgetStatus.Cancelled;
+        CancelledAtUtc = DateTime.UtcNow;
+        RaiseDomainEvent(new BudgetCancelledDomainEvent(Id, ServiceOrderId, refundedPaymentIds));
     }
 }
