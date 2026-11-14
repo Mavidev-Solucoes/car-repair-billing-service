@@ -31,6 +31,11 @@ public static class DependencyInjection
         services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
         services.AddHostedService<SagaCommandsWorker>();
 
+        if (configuration.GetValue("Database:MigrateOnStartup", true))
+        {
+            services.AddHostedService<DatabaseMigrationHostedService>();
+        }
+
         return services;
     }
 }

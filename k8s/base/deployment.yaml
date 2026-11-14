@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: car-repair-billing-service
+  labels:
+    app.kubernetes.io/name: car-repair-billing-service
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: car-repair
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: car-repair-billing-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: car-repair-billing-service
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: car-repair
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: api
+          image: car-repair-billing-service
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: car-repair-billing-service-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: billing-postgres
+                  key: password
+            - name: RabbitMq__UserName
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq
+                  key: username
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq
+                  key: password
+            # Montada a partir das variáveis acima (o Kubernetes expande $(VAR) declaradas antes).
+            - name: ConnectionStrings__Database
+              value: "Host=billing-postgres;Port=5432;Database=car_repair_billing;Username=billing;Password=$(DB_PASSWORD)"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Liveness não depende do banco nem do broker: se eles caírem, o pod só sai do balanceamento (readiness).
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false

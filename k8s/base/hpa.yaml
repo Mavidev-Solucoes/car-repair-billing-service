@@ -1,0 +1,22 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: car-repair-billing-service
+  labels:
+    app.kubernetes.io/name: car-repair-billing-service
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: car-repair
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: car-repair-billing-service
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
