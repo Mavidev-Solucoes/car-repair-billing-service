@@ -99,7 +99,12 @@ public sealed class RabbitMqCommandConsumer : ICommandConsumer, IDisposable, IAs
         {
             try
             {
-                await handler(Deserialize(eventArgs.Body), _lifetimeCancellation.Token);
+                var message = Deserialize(eventArgs.Body);
+                await MessageTracing.ConsumeAsync(
+                    message.Type,
+                    message.CorrelationId,
+                    eventArgs.BasicProperties?.Headers,
+                    () => handler(message, _lifetimeCancellation.Token));
                 await ExecuteChannelActionAsync(() =>
                 {
                     _channel.BasicAck(eventArgs.DeliveryTag, multiple: false);

@@ -64,3 +64,9 @@ kubectl -n car-repair create secret generic billing-mercadopago \
   --from-literal=accessToken='<TOKEN DE TESTE>' \
   --from-literal=webhookSecret='<ASSINATURA DO WEBHOOK>'
 ```
+
+## Observabilidade (New Relic)
+
+A imagem traz o agente .NET do New Relic com o profiler desligado; no Kubernetes o ConfigMap liga o agente (`NEW_RELIC_APP_NAME=car-repair-billing-service`) e a license vem do Secret opcional `newrelic-license`.
+
+O trace distribuído atravessa o RabbitMQ: `MessageTracing` grava `traceparent`/`tracestate` (W3C) e os headers do New Relic em cada mensagem publicada e, no consumo, abre a transação `RabbitMQ/<tipo>` que continua o trace de quem publicou, com o atributo `correlationId` (id da OS). Detalhes e consultas NRQL no README do `car-repair-k8s-infra`, seção "Observabilidade: New Relic APM e trace distribuído".
