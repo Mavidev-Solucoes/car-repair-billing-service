@@ -11,3 +11,7 @@ metadata:
 data:
   ASPNETCORE_ENVIRONMENT: "Production"
   RabbitMq__HostName: "rabbitmq"
+  # Fake (padrão) ou MercadoPago. Com MercadoPago, o token vem do Secret billing-mercadopago.
+  PaymentGateway__Provider: "Fake"
+  # URL pública do webhook pelo Kong: http://<NLB do Kong>/api/payments/webhooks/mercadopago
+  MercadoPago__NotificationUrl: ""

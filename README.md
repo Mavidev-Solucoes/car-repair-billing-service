@@ -33,3 +33,34 @@ The CI workflow validates pull requests to `main` and pushes to `main`/`develop`
 - Coverage must be at least **80%**.
 - Sonar quality gate must pass (this check runs only when SonarCloud secrets are available in the workflow context).
 - Docker image build validation must succeed.
+
+## Pagamentos com Mercado Pago
+
+O billing cobra pelo gateway escolhido em `PaymentGateway:Provider`:
+
+- `Fake` (padrão): aprova na hora, ou recusa quando a saga pede `simulatePaymentFailure`. É o usado nos testes e no e2e do kind.
+- `MercadoPago`: integração com o [Checkout Pro](https://www.mercadopago.com.br/developers/pt/docs/checkout-pro/landing).
+
+Com o Mercado Pago, a cobrança é assíncrona:
+
+1. A saga envia `ProcessPaymentCommand`; o billing cria uma preferência no Mercado Pago com `external_reference` = id do pagamento e o pagamento fica `Pending`, com o link em `checkoutUrl` (`GET /api/payments/{id}`).
+2. O cliente paga no link. No sandbox, use os [cartões de teste](https://www.mercadopago.com.br/developers/pt/docs/checkout-pro/additional-content/your-integrations/test/cards): titular `APRO` aprova, `OTHE` recusa.
+3. O Mercado Pago chama `POST /api/payments/webhooks/mercadopago`; o billing consulta o pagamento no Mercado Pago e aprova ou recusa. Daí sai `PaymentApproved` ou `PaymentRejected` para a saga, como no gateway falso.
+4. Sem URL pública para o webhook (rodando local, por exemplo), `POST /api/payments/{id}/sync` faz a mesma consulta sob demanda.
+
+Na compensação, pagamentos aprovados são estornados pela API de refunds do Mercado Pago. `simulatePaymentFailure` continua valendo: recusa sem chamar o Mercado Pago, para demonstrar o rollback.
+
+Configuração (o token nunca vai para o repositório):
+
+| Chave | Onde | Valor |
+|---|---|---|
+| `PaymentGateway__Provider` | ConfigMap | `MercadoPago` |
+| `MercadoPago__AccessToken` | Secret `billing-mercadopago`, chave `accessToken` | Access token de teste da aplicação no painel do Mercado Pago |
+| `MercadoPago__WebhookSecret` | Secret `billing-mercadopago`, chave `webhookSecret` | Assinatura secreta do webhook (opcional; com ela, notificações sem `x-signature` válida são recusadas) |
+| `MercadoPago__NotificationUrl` | ConfigMap | `http://<NLB do Kong>/api/payments/webhooks/mercadopago` |
+
+```bash
+kubectl -n car-repair create secret generic billing-mercadopago \
+  --from-literal=accessToken='<TOKEN DE TESTE>' \
+  --from-literal=webhookSecret='<ASSINATURA DO WEBHOOK>'
+```

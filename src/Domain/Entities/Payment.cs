@@ -57,6 +57,12 @@ public sealed class Payment : Entity
 
     public DateTime? RefundedAtUtc { get; private set; }
 
+    /// <summary>Link de checkout do gateway (Mercado Pago) enquanto o pagamento aguarda o cliente pagar.</summary>
+    public string? CheckoutUrl { get; private set; }
+
+    /// <summary>Referência do checkout no gateway (id da preferência no Mercado Pago).</summary>
+    public string? CheckoutReference { get; private set; }
+
     public IReadOnlyCollection<PaymentTransaction> Transactions => _transactions.AsReadOnly();
 
     public void AddTransaction(PaymentTransaction transaction)
@@ -70,6 +76,30 @@ public sealed class Payment : Entity
 
         transaction.SetPaymentId(Id);
         _transactions.Add(transaction);
+    }
+
+    /// <summary>
+    /// O gateway criou o checkout e o pagamento fica pendente até o cliente pagar (confirmação via webhook).
+    /// </summary>
+    public void AwaitCheckout(string checkoutReference, string checkoutUrl)
+    {
+        if (Status != PaymentStatus.Pending)
+        {
+            throw new InvalidOperationException("Only pending payments can wait for checkout.");
+        }
+
+        if (string.IsNullOrWhiteSpace(checkoutReference))
+        {
+            throw new ArgumentException("Checkout reference is required.", nameof(checkoutReference));
+        }
+
+        if (string.IsNullOrWhiteSpace(checkoutUrl))
+        {
+            throw new ArgumentException("Checkout URL is required.", nameof(checkoutUrl));
+        }
+
+        CheckoutReference = checkoutReference.Trim();
+        CheckoutUrl = checkoutUrl.Trim();
     }
 
     public void Approve()

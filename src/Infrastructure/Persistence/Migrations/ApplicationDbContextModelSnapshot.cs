@@ -106,6 +106,14 @@ namespace Infrastructure.Persistence.Migrations
                     b.Property<Guid>("BudgetId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CheckoutReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("CheckoutUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
