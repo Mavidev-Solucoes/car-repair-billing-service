@@ -1,3 +1,4 @@
+using Application.Payments;
 using System.Data;
 using Application.Abstractions.Payments;
 using Application.Abstractions.Persistence;
@@ -77,17 +78,14 @@ public sealed class ProcessServiceOrderPaymentCommandHandler : IRequestHandler<P
                 cancellationToken);
         }
 
-        var result = await _paymentGateway.ProcessAsync(payment.Id, payment.Amount, request.SimulateFailure, cancellationToken);
+        // Checkout já criado no gateway: o cliente ainda vai pagar, não cria outro.
+        if (payment.CheckoutUrl is not null)
+        {
+            return payment.Id;
+        }
 
-        payment.AddTransaction(new PaymentTransaction(result.IsSuccess, result.ExternalReference, result.Message));
-        if (result.IsSuccess)
-        {
-            payment.Approve();
-        }
-        else
-        {
-            payment.Reject(result.Message);
-        }
+        var result = await _paymentGateway.ProcessAsync(payment.Id, payment.Amount, request.SimulateFailure, cancellationToken);
+        PaymentGatewayOutcome.Apply(payment, result);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return payment.Id;

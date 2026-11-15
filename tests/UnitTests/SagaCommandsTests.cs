@@ -86,7 +86,7 @@ public sealed class SagaCommandsTests
     {
         var budget = Builders.ApprovedBudget(ServiceOrderId, 180m);
         var payments = new InMemoryPaymentRepository();
-        var gateway = new StubPaymentGateway(new PaymentGatewayResult(true, "charge-ref", "approved"));
+        var gateway = new StubPaymentGateway(PaymentGatewayResult.Approved("charge-ref", "approved"));
         var handler = new ProcessServiceOrderPaymentCommandHandler(new InMemoryBudgetRepository(budget), payments, gateway, new NoOpUnitOfWork());
 
         await handler.Handle(new ProcessServiceOrderPaymentCommand(ServiceOrderId, budget.Id, false), CancellationToken.None);
@@ -98,11 +98,29 @@ public sealed class SagaCommandsTests
     }
 
     [Fact]
+    public async Task ProcessPayment_WithCheckoutGateway_ShouldWaitForCustomerAndNotCreateSecondCheckout()
+    {
+        var budget = Builders.ApprovedBudget(ServiceOrderId, 180m);
+        var payments = new InMemoryPaymentRepository();
+        var gateway = new StubPaymentGateway(PaymentGatewayResult.Pending("pref-1", "https://checkout/pref-1", "aguardando"));
+        var handler = new ProcessServiceOrderPaymentCommandHandler(new InMemoryBudgetRepository(budget), payments, gateway, new NoOpUnitOfWork());
+
+        var first = await handler.Handle(new ProcessServiceOrderPaymentCommand(ServiceOrderId, budget.Id, false), CancellationToken.None);
+        var repeated = await handler.Handle(new ProcessServiceOrderPaymentCommand(ServiceOrderId, budget.Id, false), CancellationToken.None);
+
+        var payment = Assert.Single(payments.Items);
+        Assert.Equal(first, repeated);
+        Assert.Equal(PaymentStatus.Pending, payment.Status);
+        Assert.Equal("https://checkout/pref-1", payment.CheckoutUrl);
+        Assert.Equal(1, gateway.ProcessCalls);
+    }
+
+    [Fact]
     public async Task ProcessPayment_ShouldRejectWhenGatewayRefuses()
     {
         var budget = Builders.ApprovedBudget(ServiceOrderId);
         var payments = new InMemoryPaymentRepository();
-        var gateway = new StubPaymentGateway(new PaymentGatewayResult(false, "charge-ref", "Cartão recusado"));
+        var gateway = new StubPaymentGateway(PaymentGatewayResult.Rejected("charge-ref", "Cartão recusado"));
         var handler = new ProcessServiceOrderPaymentCommandHandler(new InMemoryBudgetRepository(budget), payments, gateway, new NoOpUnitOfWork());
 
         await handler.Handle(new ProcessServiceOrderPaymentCommand(ServiceOrderId, null, true), CancellationToken.None);
@@ -115,7 +133,7 @@ public sealed class SagaCommandsTests
     {
         var budget = Builders.ApprovedBudget(ServiceOrderId);
         var existing = Builders.ApprovedPayment(budget);
-        var gateway = new StubPaymentGateway(new PaymentGatewayResult(true, "charge-ref", "approved"));
+        var gateway = new StubPaymentGateway(PaymentGatewayResult.Approved("charge-ref", "approved"));
         var handler = new ProcessServiceOrderPaymentCommandHandler(
             new InMemoryBudgetRepository(budget), new InMemoryPaymentRepository(existing), gateway, new NoOpUnitOfWork());
 
@@ -131,7 +149,7 @@ public sealed class SagaCommandsTests
         var budget = Builders.ApprovedBudget(ServiceOrderId);
         var pending = new Payment(budget.Id, ServiceOrderId, budget.TotalAmount);
         var payments = new InMemoryPaymentRepository(pending);
-        var gateway = new StubPaymentGateway(new PaymentGatewayResult(true, "charge-ref", "approved"));
+        var gateway = new StubPaymentGateway(PaymentGatewayResult.Approved("charge-ref", "approved"));
         var handler = new ProcessServiceOrderPaymentCommandHandler(new InMemoryBudgetRepository(budget), payments, gateway, new NoOpUnitOfWork());
 
         await handler.Handle(new ProcessServiceOrderPaymentCommand(ServiceOrderId, budget.Id, false), CancellationToken.None);
@@ -144,7 +162,7 @@ public sealed class SagaCommandsTests
     public async Task ProcessPayment_ShouldFailForMissingOrNotApprovedBudget()
     {
         var pending = new Budget(ServiceOrderId, "Maria", [new BudgetItem("Peça", 10m, 1)]);
-        var gateway = new StubPaymentGateway(new PaymentGatewayResult(true, "r", "ok"));
+        var gateway = new StubPaymentGateway(PaymentGatewayResult.Approved("r", "ok"));
         var handler = new ProcessServiceOrderPaymentCommandHandler(
             new InMemoryBudgetRepository(pending), new InMemoryPaymentRepository(), gateway, new NoOpUnitOfWork());
 
@@ -160,7 +178,7 @@ public sealed class SagaCommandsTests
         var budget = Builders.ApprovedBudget(ServiceOrderId);
         var approved = Builders.ApprovedPayment(budget);
         var pending = new Payment(budget.Id, ServiceOrderId, 1m);
-        var gateway = new StubPaymentGateway(new PaymentGatewayResult(true, "r", "ok"));
+        var gateway = new StubPaymentGateway(PaymentGatewayResult.Approved("r", "ok"));
         var handler = CreateCancelHandler(budget, gateway, approved, pending);
 
         await handler.Handle(new CancelServiceOrderBudgetCommand(ServiceOrderId, budget.Id), CancellationToken.None);
@@ -176,7 +194,7 @@ public sealed class SagaCommandsTests
     {
         var budget = Builders.ApprovedBudget(ServiceOrderId);
         budget.Cancel([]);
-        var gateway = new StubPaymentGateway(new PaymentGatewayResult(true, "r", "ok"));
+        var gateway = new StubPaymentGateway(PaymentGatewayResult.Approved("r", "ok"));
         var handler = CreateCancelHandler(budget, gateway);
 
         await handler.Handle(new CancelServiceOrderBudgetCommand(ServiceOrderId, null), CancellationToken.None);
@@ -192,8 +210,8 @@ public sealed class SagaCommandsTests
         var budget = Builders.ApprovedBudget(ServiceOrderId);
         var approved = Builders.ApprovedPayment(budget);
         var gateway = new StubPaymentGateway(
-            new PaymentGatewayResult(true, "r", "ok"),
-            new PaymentGatewayResult(false, "r", "gateway indisponível"));
+            PaymentGatewayResult.Approved("r", "ok"),
+            PaymentGatewayResult.Rejected("r", "gateway indisponível"));
         var handler = CreateCancelHandler(budget, gateway, approved);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>

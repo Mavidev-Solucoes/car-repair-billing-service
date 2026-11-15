@@ -36,6 +36,19 @@ spec:
                 secretKeyRef:
                   name: billing-postgres
                   key: password
+            # Opcional: só existe quando o Mercado Pago está configurado (ver README).
+            - name: MercadoPago__AccessToken
+              valueFrom:
+                secretKeyRef:
+                  name: billing-mercadopago
+                  key: accessToken
+                  optional: true
+            - name: MercadoPago__WebhookSecret
+              valueFrom:
+                secretKeyRef:
+                  name: billing-mercadopago
+                  key: webhookSecret
+                  optional: true
             - name: RabbitMq__UserName
               valueFrom:
                 secretKeyRef:

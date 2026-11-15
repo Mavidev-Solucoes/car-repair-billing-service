@@ -17,7 +17,7 @@ public sealed class PaymentApprovalFlowTests
     {
         var payment = new Payment(Guid.NewGuid(), ServiceOrderId, 120m);
         var repository = new InMemoryPaymentRepository(payment);
-        var gateway = new StubPaymentGateway(new PaymentGatewayResult(true, "gateway-ref", "approved"));
+        var gateway = new StubPaymentGateway(PaymentGatewayResult.Approved("gateway-ref", "approved"));
         var unitOfWork = new NoOpUnitOfWork();
         var handler = new ApprovePaymentCommandHandler(repository, gateway, unitOfWork);
 
@@ -36,7 +36,7 @@ public sealed class PaymentApprovalFlowTests
     {
         var payment = new Payment(Guid.NewGuid(), ServiceOrderId, 120m);
         var repository = new InMemoryPaymentRepository(payment);
-        var gateway = new StubPaymentGateway(new PaymentGatewayResult(false, "gateway-ref", "gateway failure"));
+        var gateway = new StubPaymentGateway(PaymentGatewayResult.Rejected("gateway-ref", "gateway failure"));
         var unitOfWork = new NoOpUnitOfWork();
         var handler = new ApprovePaymentCommandHandler(repository, gateway, unitOfWork);
 

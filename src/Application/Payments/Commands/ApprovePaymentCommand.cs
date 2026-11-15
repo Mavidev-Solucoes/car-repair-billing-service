@@ -1,3 +1,4 @@
+using Application.Payments;
 using Application.Abstractions.Payments;
 using Application.Abstractions.Persistence;
 using Domain.Entities;
@@ -49,16 +50,7 @@ public sealed class ApprovePaymentCommandHandler : IRequestHandler<ApprovePaymen
             request.SimulateFailure,
             cancellationToken);
 
-        payment.AddTransaction(new PaymentTransaction(result.IsSuccess, result.ExternalReference, result.Message));
-
-        if (result.IsSuccess)
-        {
-            payment.Approve();
-        }
-        else
-        {
-            payment.Reject(result.Message);
-        }
+        PaymentGatewayOutcome.Apply(payment, result);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }

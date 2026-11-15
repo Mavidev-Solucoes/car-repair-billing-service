@@ -24,7 +24,18 @@ public static class DependencyInjection
         services.AddScoped<IBudgetRepository, BudgetRepository>();
         services.AddScoped<IPaymentRepository, PaymentRepository>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<ApplicationDbContext>());
-        services.AddSingleton<IPaymentGateway, FakePaymentGateway>();
+        var gatewayOptions = configuration.GetSection(PaymentGatewayOptions.SectionName).Get<PaymentGatewayOptions>()
+            ?? new PaymentGatewayOptions();
+        services.Configure<MercadoPagoOptions>(configuration.GetSection(MercadoPagoOptions.SectionName));
+        if (gatewayOptions.UsesMercadoPago)
+        {
+            services.AddHttpClient<IPaymentGateway, MercadoPagoPaymentGateway>(MercadoPagoPaymentGateway.HttpClientName, client =>
+                client.Timeout = TimeSpan.FromSeconds(15));
+        }
+        else
+        {
+            services.AddSingleton<IPaymentGateway, FakePaymentGateway>();
+        }
         services.Configure<RabbitMqOptions>(configuration.GetSection(RabbitMqOptions.SectionName));
         services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
         services.AddSingleton<ICommandConsumer, RabbitMqCommandConsumer>();

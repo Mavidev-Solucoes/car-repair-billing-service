@@ -13,6 +13,7 @@ public sealed record PaymentResponse(
     DateTime? RejectedAtUtc,
     string? RejectionReason,
     DateTime? RefundedAtUtc,
+    string? CheckoutUrl,
     IReadOnlyCollection<PaymentTransactionResponse> Transactions);
 
 public sealed record PaymentTransactionResponse(

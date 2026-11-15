@@ -83,7 +83,24 @@ internal sealed class StubPaymentGateway(PaymentGatewayResult result, PaymentGat
     public Task<PaymentGatewayResult> RefundAsync(Guid paymentId, string externalReference, decimal amount, CancellationToken cancellationToken)
     {
         RefundedReferences.Add(externalReference);
-        return Task.FromResult(refundResult ?? new PaymentGatewayResult(true, "refund-ref", "refunded"));
+        return Task.FromResult(refundResult ?? PaymentGatewayResult.Approved("refund-ref", "refunded"));
+    }
+
+    /// <summary>O que o gateway responde nas consultas (webhook e sincronização).</summary>
+    public GatewayPaymentStatus? GatewayStatus { get; set; }
+
+    public List<string> Lookups { get; } = [];
+
+    public Task<GatewayPaymentStatus?> FindAsync(string gatewayPaymentId, CancellationToken cancellationToken)
+    {
+        Lookups.Add(gatewayPaymentId);
+        return Task.FromResult(GatewayStatus);
+    }
+
+    public Task<GatewayPaymentStatus?> FindByPaymentIdAsync(Guid paymentId, CancellationToken cancellationToken)
+    {
+        Lookups.Add(paymentId.ToString("D"));
+        return Task.FromResult(GatewayStatus);
     }
 }
 

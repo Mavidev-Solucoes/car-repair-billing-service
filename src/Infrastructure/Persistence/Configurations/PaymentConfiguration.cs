@@ -19,6 +19,8 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(x => x.Amount).HasColumnType("numeric(18,2)").IsRequired();
         builder.Property(x => x.Status).IsRequired();
         builder.Property(x => x.RejectionReason).HasMaxLength(500);
+        builder.Property(x => x.CheckoutUrl).HasMaxLength(1000);
+        builder.Property(x => x.CheckoutReference).HasMaxLength(200);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.ApprovedAtUtc);
         builder.Property(x => x.RejectedAtUtc);
