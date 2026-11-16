@@ -1,6 +1,42 @@
 # car-repair-billing-service
 Esse projeto faz parte do Tech Challenge do curso de Arquitetura de Soluções da FIAP
 
+## Responsabilidades e limites do microsserviço
+
+O **Billing Service** é responsável por orçamentos, aprovação/rejeição de orçamentos, cobrança, consulta de pagamentos e compensação financeira das ordens de serviço. A criação de OS e a execução de reparos pertencem aos serviços `car-repair-os-service` e `car-repair-production-service`, respectivamente.
+
+## Arquitetura e persistência
+
+- **API:** controllers REST em `src/Api/Controllers` (`/api/budgets` e `/api/payments`); Swagger/OpenAPI habilitado no ambiente de desenvolvimento.
+- **Application:** comandos, consultas e validações com MediatR e FluentValidation para orçamentos e pagamentos.
+- **Domain:** entidades e regras de orçamento, itens, pagamento e transações de pagamento.
+- **Infrastructure:** EF Core e PostgreSQL (`ApplicationDbContext`, repositórios e migrations), RabbitMQ e implementação de gateway de pagamento.
+- **Banco próprio:** PostgreSQL `billing-postgres` na plataforma Kubernetes, com credenciais dedicadas; o Billing Service não consulta os bancos dos demais serviços.
+
+A abstração `IPaymentGateway` permite selecionar `Fake` (cenários automatizados) ou `MercadoPago` (Checkout Pro, confirmação assíncrona e estorno). Os detalhes da integração estão na seção [Pagamentos com Mercado Pago](#pagamentos-com-mercado-pago).
+
+## Participação na Saga e mensageria
+
+A Saga é **orquestrada** pelo repositório `car-repair-saga-orchestrator`. O Billing Service consome comandos do RabbitMQ e publica eventos de domínio, sem acessar diretamente outros bancos:
+
+| Comando recebido | Responsabilidade |
+| --- | --- |
+| `CreateBudgetCommand` | Criar orçamento para a OS |
+| `ProcessPaymentCommand` | Processar a cobrança do orçamento aprovado |
+| `CancelBudgetCommand` | Cancelar orçamento e estornar pagamentos aprovados (compensação) |
+
+Eventos relevantes para o fluxo: `BudgetCreated`, `BudgetApproved`, `BudgetRejected`, `PaymentApproved` e `PaymentRejected`. O `correlationId` identifica a OS em todas as mensagens. Veja o [contrato de mensageria](docs/contrato-mensageria.md) para exchanges, payloads, eventos, comandos e compensações.
+
+## Evidência de testes e cobertura — FIAP Fase 4
+
+- **Cobertura de linhas:** **88,32%** (mínimo exigido: 80%), medida no CI da branch `main` em **15/11/2026**.
+- **Evidência:** [execução bem-sucedida do GitHub Actions CI — testes, cobertura, SonarCloud e Docker](https://github.com/Mavidev-Solucoes/car-repair-billing-service/actions/runs/43690140968).
+- **Testes no repositório:** `tests/UnitTests` e `tests/IntegrationTests` (incluindo fluxos de Saga e do Mercado Pago com API externa simulada).
+- **Fluxo distribuído:** [E2E Kubernetes com cenários de sucesso e compensação](https://github.com/Mavidev-Solucoes/car-repair-k8s-infra/actions/runs/43935058397).
+
+Os percentuais são evidências de uma execução identificada, não uma afirmação de cobertura permanente. A cobertura mínima de 80% é verificada automaticamente em `.github/workflows/ci.yml`.
+
+
 ## GitHub Actions CI - SonarCloud Secrets
 
 To enable SonarCloud stages in the CI pipeline, configure these repository secrets:
