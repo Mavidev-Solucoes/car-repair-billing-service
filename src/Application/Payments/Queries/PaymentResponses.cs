@@ -29,4 +29,5 @@ public sealed record PaymentSummaryResponse(
     Guid ServiceOrderId,
     decimal Amount,
     PaymentStatus Status,
-    DateTime CreatedAtUtc);
+    DateTime CreatedAtUtc,
+    string? CheckoutUrl);
