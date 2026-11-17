@@ -35,6 +35,8 @@ public sealed class MercadoPagoFlowTests(BillingFixture fixture)
         var pending = await client.GetFromJsonAsync<PaymentResponse>($"/api/payments/{paymentId}");
         Assert.Equal(PaymentStatus.Pending, pending!.Status);
         Assert.Equal($"https://sandbox.mercadopago.test/checkout/{paymentId:N}", pending.CheckoutUrl);
+        var listed = await client.GetFromJsonAsync<List<PaymentSummaryResponse>>("/api/payments");
+        Assert.Equal(pending.CheckoutUrl, Assert.Single(listed!, payment => payment.Id == paymentId).CheckoutUrl);
 
         mercadoPago.Payments["900001"] = ("approved", paymentId);
         var webhook = await client.PostAsJsonAsync("/api/payments/webhooks/mercadopago",
